@@ -33,13 +33,16 @@ router.get('/callback', async (req, res) => {
   }
 
   try {
-    const tokenRes = await axios.post(PB_TOKEN_URL, {
-      grant_type: 'authorization_code',
-      code,
-      client_id: process.env.PB_CLIENT_ID,
-      client_secret: process.env.PB_CLIENT_SECRET,
-      redirect_uri: process.env.PB_REDIRECT_URI,
-    });
+    const tokenRes = await axios.post(PB_TOKEN_URL,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: process.env.PB_CLIENT_ID,
+        client_secret: process.env.PB_CLIENT_SECRET,
+        redirect_uri: process.env.PB_REDIRECT_URI,
+      }).toString(),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    );
 
     const { access_token } = tokenRes.data;
     // Derive workspace ID from the token response or use a hash
