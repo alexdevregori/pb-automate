@@ -57,7 +57,7 @@ router.get('/callback', async (req, res) => {
   if (state) pkceStore.delete(state);
 
   try {
-    const body = {
+    const params = {
       grant_type: 'authorization_code',
       code,
       client_id: process.env.PB_CLIENT_ID,
@@ -65,13 +65,12 @@ router.get('/callback', async (req, res) => {
       redirect_uri: process.env.PB_REDIRECT_URI,
     };
     if (codeVerifier) {
-      body.code_verifier = codeVerifier;
+      params.code_verifier = codeVerifier;
     }
 
-    const tokenRes = await axios.post(PB_TOKEN_URL,
-      new URLSearchParams(body).toString(),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
+    // PB expects token exchange params as query parameters
+    const tokenUrl = `${PB_TOKEN_URL}?${new URLSearchParams(params).toString()}`;
+    const tokenRes = await axios.post(tokenUrl);
 
     const { access_token } = tokenRes.data;
     const workspaceId = tokenRes.data.workspace_id || `ws-${Date.now()}`;
