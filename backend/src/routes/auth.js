@@ -5,8 +5,8 @@ import { storeToken } from '../services/secretManager.js';
 
 const router = Router();
 
-const PB_AUTH_URL = 'https://app.productboard.com/oauth/authorize';
-const PB_TOKEN_URL = 'https://app.productboard.com/oauth/token';
+const PB_AUTH_URL = 'https://app.productboard.com/oauth2/authorize';
+const PB_TOKEN_URL = 'https://app.productboard.com/oauth2/token';
 const SCOPES = 'entities:read entities:write entities:delete notes:read notes:write notes:delete analytics:read members:read members:pii:read users:pii:read teams:read teams:write teams:delete webhooks:read webhooks:write webhooks:delete plugin-integrations:read plugin-integrations:write plugin-integrations:delete jira-integrations:read';
 
 // GET /auth/login — redirect to Productboard OAuth
