@@ -86,8 +86,10 @@ router.get('/callback', async (req, res) => {
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     res.redirect(`${frontendUrl}/picker?token=${sessionToken}`);
   } catch (err) {
-    console.error('OAuth callback error:', err.response?.data || err.message);
-    res.status(500).json({ message: 'Failed to exchange authorization code' });
+    const errData = err.response?.data || err.message;
+    console.error('OAuth callback error:', JSON.stringify(errData));
+    console.error('OAuth callback status:', err.response?.status);
+    res.status(500).json({ message: 'Failed to exchange authorization code', detail: errData });
   }
 });
 
