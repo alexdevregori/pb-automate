@@ -1,0 +1,26 @@
+{
+  "name": "pb-automate-backend",
+  "version": "1.0.0",
+  "description": "PB Automate backend API",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@google-cloud/scheduler": "^5.3.1",
+    "@google-cloud/secret-manager": "^6.1.1",
+    "axios": "^1.15.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.8.0",
+    "jsonwebtoken": "^9.0.3",
+    "uuid": "^13.0.0"
+  }
+}

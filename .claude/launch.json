@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["src/index.js"],
+      "port": 3000,
+      "cwd": "backend",
+      "env": {
+        "NODE_ENV": "mock"
+      }
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "./node_modules/.bin/vite",
+      "runtimeArgs": ["--host"],
+      "port": 5173,
+      "cwd": "frontend"
+    }
+  ]
+}
