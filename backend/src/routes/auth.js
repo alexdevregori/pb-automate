@@ -83,8 +83,13 @@ router.get('/callback', async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    res.redirect(`${frontendUrl}/picker?token=${sessionToken}`);
+    // Redirect to frontend picker. If FRONTEND_URL is set use it (dev),
+    // otherwise use a same-origin relative redirect (prod: frontend served by this backend).
+    const frontendUrl = process.env.FRONTEND_URL;
+    const target = frontendUrl
+      ? `${frontendUrl}/picker?token=${sessionToken}`
+      : `/picker?token=${sessionToken}`;
+    res.redirect(target);
   } catch (err) {
     const errData = err.response?.data || err.message;
     console.error('OAuth callback error:', JSON.stringify(errData));

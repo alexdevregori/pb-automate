@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+.git
+.gitignore
+infra
+api-v2-specs
+**/.DS_Store
