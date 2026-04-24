@@ -14,47 +14,53 @@ function getClient() {
 }
 
 export async function storeToken(workspaceId, token) {
+  // Always store in memory as a fallback
+  mockSecrets[workspaceId] = token;
+
   const smClient = getClient();
-  if (!smClient) {
-    mockSecrets[workspaceId] = token;
-    return;
-  }
+  if (!smClient) return;
 
   const projectId = process.env.GCP_PROJECT_ID;
   const secretId = `pb-token-${workspaceId}`;
   const parent = `projects/${projectId}`;
 
   try {
-    await smClient.createSecret({
-      parent,
-      secretId,
-      secret: { replication: { automatic: {} } },
+    try {
+      await smClient.createSecret({
+        parent,
+        secretId,
+        secret: { replication: { automatic: {} } },
+      });
+    } catch (err) {
+      if (err.code !== 6) throw err; // 6 = ALREADY_EXISTS
+    }
+
+    await smClient.addSecretVersion({
+      parent: `${parent}/secrets/${secretId}`,
+      payload: { data: Buffer.from(token) },
     });
   } catch (err) {
-    if (err.code !== 6) throw err; // 6 = ALREADY_EXISTS
+    // Secret Manager unavailable — token is still in mockSecrets for this session
+    console.warn('Secret Manager unavailable, using in-memory token store:', err.message);
   }
-
-  await smClient.addSecretVersion({
-    parent: `${parent}/secrets/${secretId}`,
-    payload: { data: Buffer.from(token) },
-  });
 }
 
 export async function getToken(workspaceId) {
   const smClient = getClient();
-  if (!smClient) {
-    return mockSecrets[workspaceId] || null;
+
+  if (smClient) {
+    const projectId = process.env.GCP_PROJECT_ID;
+    const secretId = `pb-token-${workspaceId}`;
+
+    try {
+      const [version] = await smClient.accessSecretVersion({
+        name: `projects/${projectId}/secrets/${secretId}/versions/latest`,
+      });
+      return version.payload.data.toString();
+    } catch {
+      // Fall through to in-memory
+    }
   }
 
-  const projectId = process.env.GCP_PROJECT_ID;
-  const secretId = `pb-token-${workspaceId}`;
-
-  try {
-    const [version] = await smClient.accessSecretVersion({
-      name: `projects/${projectId}/secrets/${secretId}/versions/latest`,
-    });
-    return version.payload.data.toString();
-  } catch {
-    return null;
-  }
+  return mockSecrets[workspaceId] || null;
 }
