@@ -18,7 +18,7 @@ export default function RunRow({ run, selected, onClick }) {
         </div>
       </div>
       <StatusBadge status={run.status} />
-      <span className="text-[10px] text-gray-400">{(run.durationMs / 1000).toFixed(1)}s</span>
+      <span className="text-[10px] text-gray-500">{(run.durationMs / 1000).toFixed(1)}s</span>
     </button>
   );
 }

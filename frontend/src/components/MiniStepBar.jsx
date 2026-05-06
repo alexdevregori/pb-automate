@@ -1,3 +1,5 @@
+import { Check } from 'lucide-react';
+
 const steps = ['Configure', 'Deploy', 'Done'];
 
 export default function MiniStepBar({ current }) {
@@ -19,7 +21,7 @@ export default function MiniStepBar({ current }) {
                     : 'bg-gray-200 text-gray-500'
               }`}
             >
-              {done ? '✓' : n}
+              {done ? <Check size={12} /> : n}
             </div>
             <span className={`text-xs font-medium ${active ? 'text-pb-dark' : 'text-gray-400'}`}>
               {label}

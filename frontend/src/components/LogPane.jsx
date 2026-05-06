@@ -1,5 +1,5 @@
 export default function LogPane({ logs = [] }) {
-  if (!logs.length) return <div className="text-xs text-gray-400">No log lines.</div>;
+  if (!logs.length) return <div className="text-xs text-gray-500">No log lines.</div>;
   return (
     <pre className="max-h-full overflow-auto rounded-md bg-pb-dark p-3 font-mono text-[10px] leading-relaxed text-emerald-400">
       {logs.map((l, i) => {

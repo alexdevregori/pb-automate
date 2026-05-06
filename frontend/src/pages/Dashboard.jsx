@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Zap } from 'lucide-react';
+import { Plus, Zap, Check } from 'lucide-react';
 import { getScripts } from '../lib/api';
 import ScriptRow from '../components/ScriptRow';
 
@@ -44,8 +44,12 @@ export default function Dashboard() {
         >
           + Deploy your first script
         </button>
-        <div className="mt-4 text-[11px] text-gray-400">
-          ✓ Sync custom fields · ✓ Roll up scores · ✓ Propagate tags
+        <div className="mt-4 flex items-center justify-center gap-3 text-[11px] text-gray-500">
+          <span className="flex items-center gap-0.5"><Check size={10} /> Sync custom fields</span>
+          <span className="text-gray-300">·</span>
+          <span className="flex items-center gap-0.5"><Check size={10} /> Roll up scores</span>
+          <span className="text-gray-300">·</span>
+          <span className="flex items-center gap-0.5"><Check size={10} /> Propagate tags</span>
         </div>
       </div>
     );

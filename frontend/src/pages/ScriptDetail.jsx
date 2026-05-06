@@ -92,7 +92,7 @@ export default function ScriptDetail() {
           </div>
           <div className="overflow-auto" style={{ maxHeight: 'calc(100% - 40px)' }}>
             {runs.length === 0 ? (
-              <div className="p-3 text-xs text-gray-400">No runs yet.</div>
+              <div className="p-3 text-xs text-gray-500">No runs yet.</div>
             ) : (
               runs.map((r) => (
                 <RunRow
@@ -117,7 +117,7 @@ export default function ScriptDetail() {
                   </span>
                   <StatusBadge status={selected.status} />
                 </div>
-                <span className="text-[10px] text-gray-400">
+                <span className="text-[10px] text-gray-500">
                   {(selected.durationMs / 1000).toFixed(1)}s
                 </span>
               </div>
@@ -126,7 +126,7 @@ export default function ScriptDetail() {
               </div>
             </>
           ) : (
-            <div className="text-sm text-gray-400">
+            <div className="text-sm text-gray-500">
               Nothing to read yet — click Run to trigger one.
             </div>
           )}

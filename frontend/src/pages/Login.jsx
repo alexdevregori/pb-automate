@@ -76,7 +76,7 @@ export default function Login() {
           {error && (
             <p className="mt-2 text-xs text-red-600">{error}</p>
           )}
-          <p className="mt-3 text-xs text-gray-400">
+          <p className="mt-3 text-xs text-gray-500">
             Find your token in Productboard → Settings → Integrations → Public API.
           </p>
         </form>
