@@ -1,16 +1,38 @@
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, MoreHorizontal } from 'lucide-react';
+import { Play, MoreHorizontal, Pause, Trash2, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
+import { runScript, pauseScript, deleteScript } from '../lib/api';
 import StatusDot from './StatusDot';
 import StatusBadge from './StatusBadge';
 import Sparkline from './Sparkline';
 import { relativeTime } from '../lib/relativeTime';
 
-export default function ScriptRow({ deployment }) {
+export default function ScriptRow({ deployment, onChanged }) {
   const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
+
   const latestRun = deployment.latestRun;
   const recentRuns = deployment.recentRuns || [];
 
-  const status = !latestRun ? 'manual' : latestRun.status;
+  const status = deployment.paused
+    ? 'paused'
+    : !latestRun
+      ? 'manual'
+      : latestRun.status;
+
   const scheduleLabel =
     deployment.schedule === 'manual' ? 'Manual trigger' :
     deployment.schedule === 'on-change' ? 'On webhook event' :
@@ -21,6 +43,60 @@ export default function ScriptRow({ deployment }) {
     : latestRun.status === 'fail'
       ? `${relativeTime(latestRun.startedAt)} · ${latestRun.error || latestRun.summary}`
       : `${relativeTime(latestRun.startedAt)} · ${latestRun.summary}`;
+
+  const stop = (e) => e.stopPropagation();
+
+  const handleRun = async (e) => {
+    stop(e);
+    setBusy(true);
+    try {
+      const result = await runScript(deployment.id);
+      if (result?.run?.status === 'fail') {
+        toast.error(`Run failed: ${result.run.summary}`);
+      } else {
+        toast.success(`${deployment.scriptId} ran successfully`);
+      }
+      onChanged?.();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handlePauseToggle = async (e) => {
+    stop(e);
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      const next = !deployment.paused;
+      await pauseScript(deployment.id, next);
+      toast.success(next ? 'Paused' : 'Resumed');
+      onChanged?.();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (e) => {
+    stop(e);
+    setMenuOpen(false);
+    if (!window.confirm(`Delete this ${deployment.scriptId} deployment? This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteScript(deployment.id);
+      toast.success('Deleted');
+      onChanged?.();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div
@@ -33,13 +109,41 @@ export default function ScriptRow({ deployment }) {
           <span className="text-sm font-semibold text-pb-dark">{deployment.scriptId}</span>
           <StatusBadge status={status} />
         </div>
-        <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-          <button className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">
-            <Play size={12} className="mr-1 inline" /> Run
+        <div className="relative flex gap-1.5" onClick={stop} ref={menuRef}>
+          <button
+            onClick={handleRun}
+            disabled={busy}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+          >
+            <Play size={12} /> Run
           </button>
-          <button className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">
+
+          <button
+            onClick={(e) => { stop(e); setMenuOpen((o) => !o); }}
+            disabled={busy}
+            className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            aria-label="More actions"
+          >
             <MoreHorizontal size={12} />
           </button>
+
+          {menuOpen && (
+            <div className="absolute right-0 top-full z-10 mt-1 w-40 overflow-hidden rounded-md border border-gray-200 bg-white text-xs shadow-md">
+              <button
+                onClick={handlePauseToggle}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+              >
+                {deployment.paused ? <RotateCcw size={12} /> : <Pause size={12} />}
+                {deployment.paused ? 'Resume' : 'Pause'}
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={12} /> Delete
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

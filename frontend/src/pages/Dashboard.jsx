@@ -10,6 +10,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const reload = () => getScripts().then(setData).catch((e) => setError(e.message));
+
   useEffect(() => {
     // Capture token from OAuth redirect (?token=...) and persist before any API call.
     const params = new URLSearchParams(window.location.search);
@@ -18,11 +20,7 @@ export default function Dashboard() {
       localStorage.setItem('pb_token', tokenFromUrl);
       window.history.replaceState({}, '', '/dashboard');
     }
-
-    getScripts()
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    reload().finally(() => setLoading(false));
   }, []);
 
   if (loading) return <div className="text-sm text-gray-500">Loading…</div>;
@@ -70,7 +68,7 @@ export default function Dashboard() {
 
       <div className="rounded-2xl bg-white shadow-sm">
         {deployments.map((d) => (
-          <ScriptRow key={d.id} deployment={d} />
+          <ScriptRow key={d.id} deployment={d} onChanged={reload} />
         ))}
       </div>
     </>
