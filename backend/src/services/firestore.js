@@ -51,19 +51,30 @@ export async function getDeployments(workspaceId) {
   return snap.docs.map((d) => d.data());
 }
 
-export async function saveRunLog(workspaceId, deploymentId, log) {
+export async function saveRunLog(workspaceId, run) {
   const firestore = getDB();
+  const doc = {
+    runId: run.runId,
+    deploymentId: run.deploymentId,
+    status: run.status,             // 'ok' | 'fail'
+    startedAt: run.startedAt,       // ISO string
+    durationMs: run.durationMs,
+    summary: run.summary,
+    logs: run.logs,                 // string[]
+    error: run.error || null,
+  };
   if (!firestore) {
-    const key = `${workspaceId}/logs/${deploymentId}/${Date.now()}`;
-    mockStore[key] = log;
-    return log;
+    const key = `${workspaceId}/logs/${run.deploymentId}/${run.runId}`;
+    mockStore[key] = doc;
+    return doc;
   }
   await firestore
     .collection(COLLECTION)
     .doc(workspaceId)
     .collection('logs')
-    .add({ deploymentId, ...log, timestamp: new Date().toISOString() });
-  return log;
+    .doc(run.runId)
+    .set(doc);
+  return doc;
 }
 
 export async function getRunLogs(workspaceId, deploymentId) {
@@ -71,14 +82,15 @@ export async function getRunLogs(workspaceId, deploymentId) {
   if (!firestore) {
     return Object.entries(mockStore)
       .filter(([k]) => k.startsWith(`${workspaceId}/logs/${deploymentId}/`))
-      .map(([, v]) => v);
+      .map(([, v]) => v)
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
   const snap = await firestore
     .collection(COLLECTION)
     .doc(workspaceId)
     .collection('logs')
     .where('deploymentId', '==', deploymentId)
-    .orderBy('timestamp', 'desc')
+    .orderBy('startedAt', 'desc')
     .get();
   return snap.docs.map((d) => d.data());
 }

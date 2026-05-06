@@ -117,5 +117,5 @@ export async function runSyncField(pbClient, config, workspaceId) {
   }
 
   log(`Completed: ${synced} synced, ${skipped} skipped`);
-  return logs;
+  return { logs, summary: `${synced} features synced` };
 }

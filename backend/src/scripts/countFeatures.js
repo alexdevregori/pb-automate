@@ -51,5 +51,5 @@ export async function runCountFeatures(pbClient, _config, workspaceId) {
   }
 
   log('countFeatures complete ✓');
-  return logs;
+  return { logs, summary: `${all.length} features counted` };
 }
