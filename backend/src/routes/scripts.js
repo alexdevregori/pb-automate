@@ -66,14 +66,23 @@ async function runAndPersist(deployment, pbClient, workspaceId) {
   }
 }
 
-// GET /scripts — list available scripts
+// GET /scripts — list available scripts + deployments enriched with run history
 router.get('/', requireAuth, async (req, res) => {
-  const deployments = await getDeployments(req.workspace.workspaceId);
+  const workspaceId = req.workspace.workspaceId;
+  const deployments = await getDeployments(workspaceId);
+
+  const enriched = await Promise.all(
+    deployments.map(async (d) => {
+      const runs = await getRunLogs(workspaceId, d.id);
+      return { ...d, latestRun: runs[0] || null, recentRuns: runs.slice(0, 7) };
+    })
+  );
+
   const scripts = AVAILABLE_SCRIPTS.map((s) => ({
     ...s,
-    deployed: deployments.some((d) => d.scriptId === s.id),
+    deployed: enriched.some((d) => d.scriptId === s.id),
   }));
-  res.json({ scripts, deployments });
+  res.json({ scripts, deployments: enriched });
 });
 
 // POST /scripts/deploy — save config and run immediately
