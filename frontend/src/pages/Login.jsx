@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { setToken } from '../lib/auth';
-import StepBar from '../components/StepBar';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -36,7 +35,6 @@ export default function Login() {
 
   return (
     <div className="mx-auto max-w-lg px-4 py-12">
-      <StepBar current={1} />
       <div className="rounded-2xl bg-white p-8 shadow-sm">
         <h1 className="mb-2 text-2xl font-bold text-pb-dark">PB Automate</h1>
         <p className="mb-6 text-sm text-gray-500">
