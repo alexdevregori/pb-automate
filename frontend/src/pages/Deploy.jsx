@@ -25,14 +25,13 @@ export default function Deploy({ scriptId, config, onSuccess }) {
           ['Schedule', config?.schedule || 'manual'],
         ]
       : [
-          ['Script', scriptId],
-          ['Source', `${config?.sourceEntity} → ${config?.sourceField}`],
-          ['Target', `${config?.targetEntity} → ${config?.targetField}`],
-          ['Direction', config?.direction],
+          ['Script', 'Sync Custom Field'],
+          ['Direction', 'Parent → Children'],
+          ['Field name', config?.fieldName || '(not set)'],
+          ['Mode', config?.dryRun ? 'Dry run (preview only)' : 'Live (writes to Productboard)'],
           ['Schedule', config?.schedule],
           ['Overwrite existing', config?.overwriteExisting ? 'Yes' : 'No'],
-          ['Skip if empty', config?.skipIfEmpty ? 'Yes' : 'No'],
-          ['Log changes', config?.logChanges ? 'Yes' : 'No'],
+          ['Skip if parent empty', config?.skipIfEmpty ? 'Yes' : 'No'],
         ];
 
   return (

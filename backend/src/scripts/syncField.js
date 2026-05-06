@@ -1,121 +1,155 @@
-import { saveRunLog } from '../services/firestore.js';
-
 /**
- * Sync a custom field value between parent and child features.
+ * Sync a custom field value from each parent feature down to its children.
+ *
+ * Same-name field on both ends — the user picks one field name, and the script
+ * copies its value from every parent that has children to those children.
  *
  * Config shape:
- *   { sourceEntity, targetEntity, sourceField, targetField,
- *     direction, overwriteExisting, skipIfEmpty, logChanges }
+ *   {
+ *     fieldName: string,            // e.g. "Status"
+ *     dryRun: boolean,              // if true, log what would change but don't write
+ *     overwriteExisting: boolean,   // if false, skip children that already have a value
+ *     skipIfEmpty: boolean,         // if true, don't propagate when the parent's value is blank
+ *     schedule: string,             // 'manual' | 'hourly' | 'daily' | 'on-change'
+ *   }
  */
-export async function runSyncField(pbClient, config, workspaceId) {
+export async function runSyncField(pbClient, config, _workspaceId) {
   const logs = [];
   const log = (msg) => logs.push(msg);
 
-  log(`Starting syncField — direction: ${config.direction}`);
-  log(`Source: ${config.sourceEntity}.${config.sourceField} → Target: ${config.targetEntity}.${config.targetField}`);
+  const fieldName = config.fieldName || 'Status';
+  const dryRun = !!config.dryRun;
+  const overwriteExisting = !!config.overwriteExisting;
+  const skipIfEmpty = config.skipIfEmpty !== false; // default true
 
-  // Fetch all features (paginate if needed)
+  log(`Starting syncField — direction: parent → children`);
+  log(`Field: "${fieldName}"  ·  ${dryRun ? 'DRY RUN (no writes)' : 'LIVE'}`);
+  log(`Options: overwriteExisting=${overwriteExisting}, skipIfEmpty=${skipIfEmpty}`);
+
+  // 1. Fetch every feature in the workspace.
   let allFeatures = [];
   let cursor = null;
+  let pages = 0;
   do {
     const res = await pbClient.getFeatures(cursor);
-    allFeatures = allFeatures.concat(res.data);
+    allFeatures = allFeatures.concat(res.data || []);
     cursor = res.pageCursor || null;
+    pages += 1;
+    if (pages > 50) {
+      log(`Stopping after 50 pages (safety limit).`);
+      break;
+    }
   } while (cursor);
 
-  log(`Fetched ${allFeatures.length} features`);
+  log(`Fetched ${allFeatures.length} features across ${pages} page(s).`);
 
-  // Build parent-child map
-  const featureMap = new Map(allFeatures.map((f) => [f.id, f]));
+  // 2. Build a parent → [children] map. PB's feature shape can have either
+  //    `parent: 'feat-1'` or `parent: { id: 'feat-1' }` depending on the API
+  //    revision, so handle both.
+  const parentIdOf = (f) => (typeof f.parent === 'string' ? f.parent : f.parent?.id) || null;
   const parentToChildren = new Map();
   for (const f of allFeatures) {
-    if (f.parent) {
-      const children = parentToChildren.get(f.parent) || [];
-      children.push(f.id);
-      parentToChildren.set(f.parent, children);
-    }
+    const pid = parentIdOf(f);
+    if (!pid) continue;
+    const children = parentToChildren.get(pid) || [];
+    children.push(f);
+    parentToChildren.set(pid, children);
   }
 
-  let synced = 0;
+  const parents = allFeatures.filter((f) => parentToChildren.has(f.id));
+  log(`Found ${parents.length} parent feature(s) with at least one child.`);
+
+  // 3. Walk each parent. Diagnostic dump on the first parent so we can verify
+  //    the custom-fields response shape against what this code assumes.
+  let plannedUpdates = 0;
+  let appliedUpdates = 0;
   let skipped = 0;
+  let firstShapeLogged = false;
 
-  for (const feature of allFeatures) {
-    const children = parentToChildren.get(feature.id) || [];
-    if (children.length === 0 && config.direction !== 'children-to-parent') continue;
-    if (feature.parent && config.direction === 'children-to-parent') continue;
+  for (const parent of parents) {
+    const children = parentToChildren.get(parent.id) || [];
 
-    // Get custom fields for the source feature
-    const sourceFields = await pbClient.getFeatureCustomFields(feature.id);
-    const sourceField = sourceFields.data?.find(
-      (f) => f.name === config.sourceField || f.id === config.sourceField
-    );
-
-    if (!sourceField) {
-      log(`[SKIP] ${feature.name} (${feature.id}): source field "${config.sourceField}" not found`);
-      skipped++;
+    let parentFieldsRes;
+    try {
+      parentFieldsRes = await pbClient.getFeatureCustomFields(parent.id);
+    } catch (err) {
+      log(`[ERROR] Could not fetch custom fields for parent ${parent.id}: ${err.message}`);
+      skipped += children.length;
       continue;
     }
 
-    if (config.skipIfEmpty && (sourceField.value === null || sourceField.value === '')) {
-      log(`[SKIP] ${feature.name} (${feature.id}): source field is empty`);
-      skipped++;
+    if (!firstShapeLogged) {
+      // One-time diagnostic — first custom-fields response shape, truncated.
+      const sample = JSON.stringify(parentFieldsRes).slice(0, 240);
+      log(`[diag] first custom-fields response: ${sample}${sample.length >= 240 ? '…' : ''}`);
+      firstShapeLogged = true;
+    }
+
+    const parentField = (parentFieldsRes.data || []).find((f) => f.name === fieldName);
+    if (!parentField) {
+      log(`[SKIP] ${parent.name || parent.id}: field "${fieldName}" not found on parent`);
+      skipped += children.length;
       continue;
     }
 
-    // Determine targets based on direction
-    let targetIds = [];
-    if (config.direction === 'parent-to-children') {
-      targetIds = children;
-    } else if (config.direction === 'children-to-parent' && feature.parent) {
-      targetIds = [feature.parent];
-    } else if (config.direction === 'bidirectional') {
-      targetIds = [...children];
-      if (feature.parent) targetIds.push(feature.parent);
+    const sourceValue = parentField.value;
+    if (skipIfEmpty && (sourceValue === null || sourceValue === '' || sourceValue === undefined)) {
+      log(`[SKIP] ${parent.name || parent.id}: parent's "${fieldName}" is empty`);
+      skipped += children.length;
+      continue;
     }
 
-    for (const targetId of targetIds) {
-      const targetFields = await pbClient.getFeatureCustomFields(targetId);
-      const targetField = targetFields.data?.find(
-        (f) => f.name === config.targetField || f.id === config.targetField
-      );
-
-      if (!targetField) {
-        log(`[SKIP] Target ${targetId}: field "${config.targetField}" not found`);
+    for (const child of children) {
+      let childFieldsRes;
+      try {
+        childFieldsRes = await pbClient.getFeatureCustomFields(child.id);
+      } catch (err) {
+        log(`[ERROR] Could not fetch custom fields for child ${child.id}: ${err.message}`);
         skipped++;
         continue;
       }
 
-      if (!config.overwriteExisting && targetField.value !== null && targetField.value !== '') {
-        log(`[SKIP] Target ${targetId}: existing value "${targetField.value}" preserved`);
+      const childField = (childFieldsRes.data || []).find((f) => f.name === fieldName);
+      if (!childField) {
+        log(`[SKIP] ${child.name || child.id}: field "${fieldName}" not found on child`);
         skipped++;
         continue;
       }
 
-      if (targetField.value === sourceField.value) {
+      if (childField.value === sourceValue) {
         skipped++;
         continue;
       }
 
-      const oldValue = targetField.value;
-      await pbClient.updateCustomField(targetId, targetField.id, sourceField.value);
-
-      const targetFeature = featureMap.get(targetId);
-      const changeLog = `[SYNC] ${targetFeature?.name || targetId}: ${config.targetField} "${oldValue}" → "${sourceField.value}"`;
-      log(changeLog);
-
-      if (config.logChanges) {
-        await saveRunLog(workspaceId, 'syncField', {
-          featureId: targetId,
-          field: config.targetField,
-          oldValue,
-          newValue: sourceField.value,
-        });
+      const childHasValue = childField.value !== null && childField.value !== '' && childField.value !== undefined;
+      if (childHasValue && !overwriteExisting) {
+        log(`[SKIP] ${child.name || child.id}: existing value "${childField.value}" preserved`);
+        skipped++;
+        continue;
       }
 
-      synced++;
+      if (dryRun) {
+        log(`[DRY-RUN] ${child.name || child.id}: would set "${fieldName}" "${childField.value ?? ''}" → "${sourceValue}"`);
+        plannedUpdates++;
+        continue;
+      }
+
+      try {
+        await pbClient.updateCustomField(child.id, childField.id, sourceValue);
+        log(`[SYNC] ${child.name || child.id}: ${fieldName} "${childField.value ?? ''}" → "${sourceValue}"`);
+        appliedUpdates++;
+      } catch (err) {
+        log(`[ERROR] ${child.name || child.id}: update failed — ${err.message}`);
+        skipped++;
+      }
     }
   }
 
-  log(`Completed: ${synced} synced, ${skipped} skipped`);
-  return { logs, summary: `${synced} features synced` };
+  if (dryRun) {
+    log(`Dry-run complete: would update ${plannedUpdates}, skip ${skipped}.`);
+    return { logs, summary: `Would update ${plannedUpdates} features (dry run)` };
+  }
+
+  log(`Completed: ${appliedUpdates} updated, ${skipped} skipped.`);
+  return { logs, summary: `${appliedUpdates} features synced` };
 }
