@@ -3,7 +3,8 @@ import axios from 'axios';
 const PB_API_BASE = 'https://api.productboard.com';
 
 export function createPBClient(accessToken) {
-  const client = axios.create({
+  // V1 client — uses X-Version: 1 header (no URL prefix).
+  const v1 = axios.create({
     baseURL: PB_API_BASE,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -12,27 +13,42 @@ export function createPBClient(accessToken) {
     },
   });
 
+  // V2 client — uses /v2 URL prefix (no version header).
+  const v2 = axios.create({
+    baseURL: `${PB_API_BASE}/v2`,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
   return {
     async getFeatures(cursor) {
       const params = cursor ? { pageCursor: cursor } : {};
-      const res = await client.get('/features', { params });
+      const res = await v1.get('/features', { params });
       return res.data;
     },
 
     async getFeatureCustomFields(featureId) {
-      const res = await client.get(`/features/${featureId}/custom-fields`);
+      const res = await v1.get(`/features/${featureId}/custom-fields`);
       return res.data;
     },
 
     async updateCustomField(featureId, fieldId, value) {
-      const res = await client.patch(`/features/${featureId}/custom-fields/${fieldId}`, {
+      const res = await v1.patch(`/features/${featureId}/custom-fields/${fieldId}`, {
         value,
       });
       return res.data;
     },
 
     async getFeature(featureId) {
-      const res = await client.get(`/features/${featureId}`);
+      const res = await v1.get(`/features/${featureId}`);
+      return res.data;
+    },
+
+    // V2: fetch the field schema for an entity type (e.g. 'feature', 'subfeature').
+    async getEntityConfiguration(entityType) {
+      const res = await v2.get(`/entities/configurations/${entityType}`);
       return res.data;
     },
   };

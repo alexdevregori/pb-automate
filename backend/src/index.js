@@ -5,6 +5,7 @@ import dotenv from 'dotenv';
 import authRoutes from './routes/auth.js';
 import scriptsRoutes from './routes/scripts.js';
 import webhooksRoutes from './routes/webhooks.js';
+import pbRoutes from './routes/pb.js';
 
 import { fileURLToPath } from 'url';
 import { dirname, resolve, join } from 'path';
@@ -33,6 +34,7 @@ app.use((req, _res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/scripts', scriptsRoutes);
 app.use('/api/webhooks', webhooksRoutes);
+app.use('/api/pb', pbRoutes);
 
 // Keep /auth for direct OAuth redirect URIs registered in the PB OAuth app
 app.use('/auth', authRoutes);
@@ -46,7 +48,7 @@ const publicDir = resolve(__dirname, '..', 'public');
 if (existsSync(publicDir)) {
   app.use(express.static(publicDir));
   // SPA fallback — any non-API route returns index.html so React Router handles it
-  app.get(/^\/(?!api|auth|health|webhooks|scripts).*/, (req, res) => {
+  app.get(/^\/(?!api|auth|health|webhooks|scripts|pb).*/, (req, res) => {
     res.sendFile(join(publicDir, 'index.html'));
   });
 }

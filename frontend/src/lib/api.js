@@ -50,3 +50,7 @@ export function pauseScript(id, paused) {
 export function deleteScript(id) {
   return request(`/scripts/${id}`, { method: 'DELETE' }).catch(() => ({}));
 }
+
+export function getAvailableFields() {
+  return request('/pb/fields');
+}
