@@ -35,3 +35,18 @@ export function runScript(id) {
 export function getScriptLogs(id) {
   return request(`/scripts/${id}/logs`);
 }
+
+export function getScript(id) {
+  return request(`/scripts/${id}`);
+}
+
+export function pauseScript(id, paused) {
+  return request(`/scripts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ paused }),
+  });
+}
+
+export function deleteScript(id) {
+  return request(`/scripts/${id}`, { method: 'DELETE' }).catch(() => ({}));
+}
