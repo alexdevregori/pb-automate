@@ -1,9 +1,9 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { requireAuth } from '../middleware/auth.js';
-import { saveDeployment, getDeployments, getRunLogs } from '../services/firestore.js';
+import { saveDeployment, getDeployments, getDeployment, saveRunLog, getRunLogs, patchDeployment, deleteDeployment } from '../services/firestore.js';
 import { getToken } from '../services/secretManager.js';
-import { createPBClient, createMockPBClient } from '../services/pbClient.js';
+import { createPBClient } from '../services/pbClient.js';
 import { runSyncField } from '../scripts/syncField.js';
 import { runCountFeatures } from '../scripts/countFeatures.js';
 
@@ -32,6 +32,40 @@ const AVAILABLE_SCRIPTS = [
   },
 ];
 
+async function executeScript(scriptId, pbClient, config, workspaceId) {
+  if (scriptId === 'syncField') return runSyncField(pbClient, config, workspaceId);
+  if (scriptId === 'countFeatures') return runCountFeatures(pbClient, config, workspaceId);
+  throw new Error(`No runner registered for scriptId="${scriptId}"`);
+}
+
+async function runAndPersist(deployment, pbClient, workspaceId) {
+  const runId = uuidv4();
+  const startedAt = new Date().toISOString();
+  const t0 = Date.now();
+  try {
+    const { logs, summary } = await executeScript(
+      deployment.scriptId, pbClient, deployment.config, workspaceId
+    );
+    const run = {
+      runId, deploymentId: deployment.id, status: 'ok', startedAt,
+      durationMs: Date.now() - t0, summary, logs,
+    };
+    await saveRunLog(workspaceId, run);
+    return run;
+  } catch (err) {
+    console.error('Script run failed:', err);
+    const run = {
+      runId, deploymentId: deployment.id, status: 'fail', startedAt,
+      durationMs: Date.now() - t0,
+      summary: err.message || 'Run failed',
+      logs: [`Error: ${err.message}`],
+      error: err.message,
+    };
+    await saveRunLog(workspaceId, run);
+    return run;
+  }
+}
+
 // GET /scripts — list available scripts
 router.get('/', requireAuth, async (req, res) => {
   const deployments = await getDeployments(req.workspace.workspaceId);
@@ -42,7 +76,7 @@ router.get('/', requireAuth, async (req, res) => {
   res.json({ scripts, deployments });
 });
 
-// POST /scripts/deploy — save config and create scheduler job
+// POST /scripts/deploy — save config and run immediately
 router.post('/deploy', requireAuth, async (req, res) => {
   const { scriptId, ...config } = req.body;
   const deploymentId = uuidv4();
@@ -55,84 +89,55 @@ router.post('/deploy', requireAuth, async (req, res) => {
     workspaceId,
     status: 'active',
     schedule: config.schedule || 'manual',
+    createdAt: new Date().toISOString(),
   };
 
   await saveDeployment(workspaceId, deployment);
 
-  // Run the script immediately for first sync
-  let logs = [];
-  try {
-    const pbClient = req.workspace.mock
-      ? createMockPBClient()
-      : createPBClient(await getToken(workspaceId));
+  const pbClient = createPBClient(await getToken(workspaceId));
+  const run = await runAndPersist(deployment, pbClient, workspaceId);
 
-    if (scriptId === 'syncField') {
-      logs = await runSyncField(pbClient, config, workspaceId);
-    } else if (scriptId === 'countFeatures') {
-      logs = await runCountFeatures(pbClient, config, workspaceId);
-    } else {
-      logs = [`No runner registered for scriptId="${scriptId}"`];
-    }
-  } catch (err) {
-    console.error('Script run failed:', err);
-    logs = [`Error during initial sync: ${err.message}`];
-  }
+  console.log(`✓ deployed ${scriptId} (${deploymentId.slice(0, 8)}) — run ${run.status}, ${run.logs.length} log line(s)`);
 
-  console.log(`✓ deployed ${scriptId} (${deploymentId.slice(0, 8)}) — ${logs.length} log line(s)`);
-
-  const scheduleCronMap = {
-    hourly: '0 * * * *',
-    daily: '0 0 * * *',
-    'on-change': 'webhook',
-    manual: 'none',
-  };
-
-  res.json({
-    jobId: `pb-${scriptId}-${deploymentId.slice(0, 8)}`,
-    deploymentId,
-    nextRun: config.schedule === 'manual'
-      ? 'Manual trigger only'
-      : config.schedule === 'on-change'
-      ? 'On webhook event'
-      : `Cron: ${scheduleCronMap[config.schedule]}`,
-    logs,
-  });
+  res.json({ deployment, run });
 });
 
 // POST /scripts/:id/run — manually trigger a script
 router.post('/:id/run', requireAuth, async (req, res) => {
-  const { id } = req.params;
   const workspaceId = req.workspace.workspaceId;
-
-  const deployments = await getDeployments(workspaceId);
-  const deployment = deployments.find((d) => d.id === id);
+  const deployment = await getDeployment(workspaceId, req.params.id);
 
   if (!deployment) {
     return res.status(404).json({ message: 'Deployment not found' });
   }
 
-  try {
-    const pbClient = req.workspace.mock
-      ? createMockPBClient()
-      : createPBClient(await getToken(workspaceId));
-
-    let logs = [];
-    if (deployment.scriptId === 'syncField') {
-      logs = await runSyncField(pbClient, deployment.config, workspaceId);
-    } else if (deployment.scriptId === 'countFeatures') {
-      logs = await runCountFeatures(pbClient, deployment.config, workspaceId);
-    }
-
-    res.json({ status: 'completed', logs });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  const pbClient = createPBClient(await getToken(workspaceId));
+  const run = await runAndPersist(deployment, pbClient, workspaceId);
+  res.json({ run });
 });
 
-// GET /scripts/:id/logs — fetch run logs
-router.get('/:id/logs', requireAuth, async (req, res) => {
-  const logs = await getRunLogs(req.workspace.workspaceId, req.params.id);
-  res.json({ logs });
+// GET /scripts/:id — deployment + recent runs
+router.get('/:id', requireAuth, async (req, res) => {
+  const workspaceId = req.workspace.workspaceId;
+  const deployment = await getDeployment(workspaceId, req.params.id);
+  if (!deployment) return res.status(404).json({ message: 'Deployment not found' });
+  const runs = await getRunLogs(workspaceId, req.params.id);
+  res.json({ deployment, runs });
+});
+
+// PATCH /scripts/:id — pause/resume or update config
+router.patch('/:id', requireAuth, async (req, res) => {
+  const updated = await patchDeployment(
+    req.workspace.workspaceId, req.params.id, req.body
+  );
+  if (!updated) return res.status(404).json({ message: 'Deployment not found' });
+  res.json(updated);
+});
+
+// DELETE /scripts/:id
+router.delete('/:id', requireAuth, async (req, res) => {
+  await deleteDeployment(req.workspace.workspaceId, req.params.id);
+  res.status(204).end();
 });
 
 export default router;

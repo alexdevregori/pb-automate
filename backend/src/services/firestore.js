@@ -51,6 +51,39 @@ export async function getDeployments(workspaceId) {
   return snap.docs.map((d) => d.data());
 }
 
+export async function getDeployment(workspaceId, deploymentId) {
+  const firestore = getDB();
+  if (!firestore) {
+    return mockStore[`${workspaceId}/deployments/${deploymentId}`] || null;
+  }
+  const snap = await firestore
+    .collection(COLLECTION).doc(workspaceId)
+    .collection('deployments').doc(deploymentId).get();
+  return snap.exists ? snap.data() : null;
+}
+
+export async function patchDeployment(workspaceId, deploymentId, patch) {
+  const firestore = getDB();
+  if (!firestore) {
+    const key = `${workspaceId}/deployments/${deploymentId}`;
+    if (mockStore[key]) mockStore[key] = { ...mockStore[key], ...patch };
+    return mockStore[key] || null;
+  }
+  await firestore.collection(COLLECTION).doc(workspaceId)
+    .collection('deployments').doc(deploymentId).update(patch);
+  return getDeployment(workspaceId, deploymentId);
+}
+
+export async function deleteDeployment(workspaceId, deploymentId) {
+  const firestore = getDB();
+  if (!firestore) {
+    delete mockStore[`${workspaceId}/deployments/${deploymentId}`];
+    return;
+  }
+  await firestore.collection(COLLECTION).doc(workspaceId)
+    .collection('deployments').doc(deploymentId).delete();
+}
+
 export async function saveRunLog(workspaceId, run) {
   const firestore = getDB();
   const doc = {
