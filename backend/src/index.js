@@ -23,6 +23,12 @@ app.use(cors({
 app.use(express.json());
 app.use(cookieParser());
 
+// Tiny request logger so we can see what's actually hitting the backend
+app.use((req, _res, next) => {
+  console.log(`→ ${req.method} ${req.url}`);
+  next();
+});
+
 // API routes mounted under /api so frontend (served from same origin) can call them
 app.use('/api/auth', authRoutes);
 app.use('/api/scripts', scriptsRoutes);

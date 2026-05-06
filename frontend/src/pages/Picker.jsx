@@ -1,9 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import StepBar from '../components/StepBar';
 import ScriptCard from '../components/ScriptCard';
+import { setToken } from '../lib/auth';
 
 const scripts = [
+  {
+    id: 'countFeatures',
+    title: 'Count Features (Smoke Test)',
+    description: 'Read-only test: counts features in your workspace to verify the deploy pipeline works.',
+    icon: 'sync',
+  },
   {
     id: 'syncField',
     title: 'Sync Custom Field',
@@ -33,6 +40,17 @@ const scripts = [
 export default function Picker() {
   const [selected, setSelected] = useState('syncField');
   const navigate = useNavigate();
+
+  // Capture session token from the OAuth redirect (?token=...) and persist it
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tokenFromUrl = params.get('token');
+    if (tokenFromUrl) {
+      setToken(tokenFromUrl);
+      // Clean the URL so the token isn't visible / bookmarkable
+      window.history.replaceState({}, '', '/picker');
+    }
+  }, []);
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">

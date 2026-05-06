@@ -38,6 +38,33 @@ export default function Configure() {
     });
   };
 
+  // Smoke-test script has no configurable fields — show a minimal Configure screen.
+  if (scriptId === 'countFeatures') {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-12">
+        <StepBar current={3} />
+        <div className="rounded-2xl bg-white p-8 shadow-sm">
+          <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
+          <p className="mb-6 text-sm text-gray-500">
+            This is a read-only smoke test — no configuration needed. Pick a schedule and continue.
+          </p>
+
+          <div className="mb-6">
+            <h3 className="mb-3 text-sm font-semibold text-pb-dark">Schedule</h3>
+            <SchedulePicker value={schedule} onChange={setSchedule} />
+          </div>
+
+          <button
+            onClick={() => navigate('/deploy', { state: { scriptId, config: { schedule } } })}
+            className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90"
+          >
+            Review & Deploy
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
       <StepBar current={3} />

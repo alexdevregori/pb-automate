@@ -23,16 +23,21 @@ export default function Deploy() {
     }
   };
 
-  const rows = [
-    ['Script', scriptId],
-    ['Source', `${config?.sourceEntity} → ${config?.sourceField}`],
-    ['Target', `${config?.targetEntity} → ${config?.targetField}`],
-    ['Direction', config?.direction],
-    ['Schedule', config?.schedule],
-    ['Overwrite existing', config?.overwriteExisting ? 'Yes' : 'No'],
-    ['Skip if empty', config?.skipIfEmpty ? 'Yes' : 'No'],
-    ['Log changes', config?.logChanges ? 'Yes' : 'No'],
-  ];
+  const rows = scriptId === 'countFeatures'
+    ? [
+        ['Script', 'Count Features (Smoke Test)'],
+        ['Schedule', config?.schedule || 'manual'],
+      ]
+    : [
+        ['Script', scriptId],
+        ['Source', `${config?.sourceEntity} → ${config?.sourceField}`],
+        ['Target', `${config?.targetEntity} → ${config?.targetField}`],
+        ['Direction', config?.direction],
+        ['Schedule', config?.schedule],
+        ['Overwrite existing', config?.overwriteExisting ? 'Yes' : 'No'],
+        ['Skip if empty', config?.skipIfEmpty ? 'Yes' : 'No'],
+        ['Log changes', config?.logChanges ? 'Yes' : 'No'],
+      ];
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">

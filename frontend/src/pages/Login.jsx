@@ -1,20 +1,37 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { setToken } from '../lib/auth';
 import StepBar from '../components/StepBar';
 
 export default function Login() {
   const navigate = useNavigate();
+  const [pbToken, setPbToken] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   const handleOAuth = () => {
     window.location.href = '/api/auth/login';
   };
 
-  const handleMock = async () => {
-    const res = await fetch('/api/auth/mock', { method: 'POST' });
-    const data = await res.json();
-    setToken(data.token);
-    navigate('/picker');
+  const handleTokenSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/auth/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: pbToken.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || 'Failed to authenticate');
+      setToken(data.token);
+      navigate('/picker');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -38,16 +55,33 @@ export default function Login() {
             <div className="w-full border-t border-gray-200" />
           </div>
           <div className="relative flex justify-center text-xs">
-            <span className="bg-white px-2 text-gray-400">or</span>
+            <span className="bg-white px-2 text-gray-400">or use a PB API token</span>
           </div>
         </div>
 
-        <button
-          onClick={handleMock}
-          className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
-        >
-          Use Mock Workspace (Local Dev)
-        </button>
+        <form onSubmit={handleTokenSubmit}>
+          <input
+            type="password"
+            value={pbToken}
+            onChange={(e) => setPbToken(e.target.value)}
+            placeholder="Paste your Productboard API token"
+            className="mb-2 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
+            disabled={submitting}
+          />
+          <button
+            type="submit"
+            disabled={submitting || !pbToken.trim()}
+            className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? 'Signing in…' : 'Continue with API token'}
+          </button>
+          {error && (
+            <p className="mt-2 text-xs text-red-600">{error}</p>
+          )}
+          <p className="mt-3 text-xs text-gray-400">
+            Find your token in Productboard → Settings → Integrations → Public API.
+          </p>
+        </form>
       </div>
     </div>
   );

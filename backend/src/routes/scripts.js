@@ -5,10 +5,16 @@ import { saveDeployment, getDeployments, getRunLogs } from '../services/firestor
 import { getToken } from '../services/secretManager.js';
 import { createPBClient, createMockPBClient } from '../services/pbClient.js';
 import { runSyncField } from '../scripts/syncField.js';
+import { runCountFeatures } from '../scripts/countFeatures.js';
 
 const router = Router();
 
 const AVAILABLE_SCRIPTS = [
+  {
+    id: 'countFeatures',
+    name: 'Count Features (Smoke Test)',
+    description: 'Read-only: counts features in your workspace. Use to verify the deploy pipeline works.',
+  },
   {
     id: 'syncField',
     name: 'Sync Custom Field',
@@ -62,10 +68,17 @@ router.post('/deploy', requireAuth, async (req, res) => {
 
     if (scriptId === 'syncField') {
       logs = await runSyncField(pbClient, config, workspaceId);
+    } else if (scriptId === 'countFeatures') {
+      logs = await runCountFeatures(pbClient, config, workspaceId);
+    } else {
+      logs = [`No runner registered for scriptId="${scriptId}"`];
     }
   } catch (err) {
+    console.error('Script run failed:', err);
     logs = [`Error during initial sync: ${err.message}`];
   }
+
+  console.log(`✓ deployed ${scriptId} (${deploymentId.slice(0, 8)}) — ${logs.length} log line(s)`);
 
   const scheduleCronMap = {
     hourly: '0 * * * *',
@@ -106,6 +119,8 @@ router.post('/:id/run', requireAuth, async (req, res) => {
     let logs = [];
     if (deployment.scriptId === 'syncField') {
       logs = await runSyncField(pbClient, deployment.config, workspaceId);
+    } else if (deployment.scriptId === 'countFeatures') {
+      logs = await runCountFeatures(pbClient, deployment.config, workspaceId);
     }
 
     res.json({ status: 'completed', logs });
