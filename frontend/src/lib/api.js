@@ -47,6 +47,13 @@ export function pauseScript(id, paused) {
   });
 }
 
+export function updateDeployment(id, patch) {
+  return request(`/scripts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
 export function deleteScript(id) {
   return request(`/scripts/${id}`, { method: 'DELETE' }).catch(() => ({}));
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import SchedulePicker from '../components/SchedulePicker';
 import { getAvailableFields, getHierarchy } from '../lib/api';
 
@@ -15,17 +15,36 @@ const TYPE_LABELS = {
 
 const labelOf = (t) => TYPE_LABELS[t] || t;
 
-export default function Configure({ scriptId, onContinue }) {
-  // ---- countFeatures (no config beyond schedule) ----
+/**
+ * Reusable configuration form.
+ *
+ * Props:
+ *   scriptId       — 'countFeatures' or 'syncField'
+ *   onContinue     — called with { config } when the user clicks the submit button
+ *   initialConfig  — optional, prefills the form (used by ScriptEdit)
+ *   submitLabel    — optional, defaults to 'Review & Deploy'
+ */
+export default function Configure({ scriptId, onContinue, initialConfig, submitLabel }) {
   if (scriptId === 'countFeatures') {
-    return <CountFeaturesConfigure onContinue={onContinue} />;
+    return (
+      <CountFeaturesConfigure
+        initialConfig={initialConfig}
+        onContinue={onContinue}
+        submitLabel={submitLabel}
+      />
+    );
   }
-
-  return <SyncFieldConfigure onContinue={onContinue} />;
+  return (
+    <SyncFieldConfigure
+      initialConfig={initialConfig}
+      onContinue={onContinue}
+      submitLabel={submitLabel}
+    />
+  );
 }
 
-function CountFeaturesConfigure({ onContinue }) {
-  const [schedule, setSchedule] = useState('manual');
+function CountFeaturesConfigure({ initialConfig, onContinue, submitLabel = 'Review & Deploy' }) {
+  const [schedule, setSchedule] = useState(initialConfig?.schedule || 'manual');
   return (
     <div>
       <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
@@ -40,60 +59,68 @@ function CountFeaturesConfigure({ onContinue }) {
         onClick={() => onContinue({ config: { schedule } })}
         className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90"
       >
-        Review &amp; Deploy
+        {submitLabel}
       </button>
     </div>
   );
 }
 
-function SyncFieldConfigure({ onContinue }) {
-  // Hierarchy + form state
+function SyncFieldConfigure({ initialConfig, onContinue, submitLabel = 'Review & Deploy' }) {
   const [hierarchy, setHierarchy] = useState(null);
   const [hierarchyError, setHierarchyError] = useState(null);
 
-  const [parentType, setParentType] = useState('feature');
-  const [childTypes, setChildTypes] = useState([]); // multi-select
-  const [fieldName, setFieldName] = useState('');
-  const [schedule, setSchedule] = useState('manual');
-  const [dryRun, setDryRun] = useState(true);
-  const [overwriteExisting, setOverwriteExisting] = useState(false);
-  const [skipIfEmpty, setSkipIfEmpty] = useState(true);
+  // Form state — initialized from initialConfig if provided.
+  const [parentType, setParentType] = useState(initialConfig?.parentType || 'feature');
+  const [childTypes, setChildTypes] = useState(initialConfig?.childTypes || []);
+  const [fieldName, setFieldName] = useState(initialConfig?.fieldName || '');
+  const [schedule, setSchedule] = useState(initialConfig?.schedule || 'manual');
+  const [dryRun, setDryRun] = useState(initialConfig?.dryRun ?? true);
+  const [overwriteExisting, setOverwriteExisting] = useState(initialConfig?.overwriteExisting ?? false);
+  const [skipIfEmpty, setSkipIfEmpty] = useState(initialConfig?.skipIfEmpty ?? true);
 
-  // Field list state
-  const [fields, setFields] = useState(null); // null=loading, []=none, [...]=options
+  const [fields, setFields] = useState(null);
   const [fieldsError, setFieldsError] = useState(null);
 
-  // 1. Load the hierarchy once.
+  // Tracks whether the user has explicitly changed the parent dropdown.
+  // Used to gate the "reset childTypes when parent changes" effect so we
+  // don't wipe a saved selection on initial mount when editing.
+  const userChangedParent = useRef(false);
+
+  // 1. Load hierarchy once.
   useEffect(() => {
     getHierarchy()
       .then((res) => {
         setHierarchy(res.hierarchy);
-        const firstParent = Object.keys(res.hierarchy)[0];
-        setParentType(firstParent);
-        setChildTypes(res.hierarchy[firstParent] || []);
+        // No initial config? Pick the first valid parent type as a default.
+        if (!initialConfig) {
+          const firstParent = Object.keys(res.hierarchy)[0];
+          setParentType(firstParent);
+          setChildTypes(res.hierarchy[firstParent] || []);
+        }
       })
       .catch((err) => setHierarchyError(err.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2. When parentType changes, reset childTypes to all valid children of that parent.
+  // 2. When the user changes parentType (after mount), reset childTypes
+  //    to that parent's full set of valid children.
   useEffect(() => {
-    if (!hierarchy) return;
+    if (!hierarchy || !userChangedParent.current) return;
     setChildTypes(hierarchy[parentType] || []);
   }, [parentType, hierarchy]);
 
-  // 3. Re-fetch field list when parentType or childTypes change.
+  // 3. Re-fetch fields whenever parent or child types change.
   useEffect(() => {
     if (!parentType || !childTypes.length) {
       setFields([]);
       return;
     }
-    setFields(null); // loading
+    setFields(null);
     setFieldsError(null);
     getAvailableFields({ parentType, childTypes })
       .then((res) => {
         const list = res.fields || [];
         setFields(list);
-        // Keep current selection if still valid; otherwise pick first.
         if (list.length && !list.some((f) => f.name === fieldName)) {
           setFieldName(list[0].name);
         }
@@ -128,7 +155,9 @@ function SyncFieldConfigure({ onContinue }) {
 
   return (
     <div>
-      <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
+      <h2 className="mb-1 text-xl font-bold text-pb-dark">
+        {initialConfig ? 'Edit Script' : 'Configure Script'}
+      </h2>
       <p className="mb-6 text-sm text-gray-500">
         Pick a parent entity type, the child types to sync into, and a field. The script copies the parent's value down to all matching descendants.
       </p>
@@ -137,7 +166,10 @@ function SyncFieldConfigure({ onContinue }) {
         <h3 className="mb-3 text-sm font-semibold text-pb-dark">Parent type</h3>
         <select
           value={parentType}
-          onChange={(e) => setParentType(e.target.value)}
+          onChange={(e) => {
+            userChangedParent.current = true;
+            setParentType(e.target.value);
+          }}
           className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
         >
           {Object.keys(hierarchy).map((t) => (
@@ -269,7 +301,7 @@ function SyncFieldConfigure({ onContinue }) {
         }
         className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Review &amp; Deploy
+        {submitLabel}
       </button>
     </div>
   );

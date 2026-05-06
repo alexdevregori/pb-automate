@@ -76,7 +76,10 @@ export default function ScriptDetail() {
           >
             <Play size={12} /> {running ? 'Running…' : 'Run'}
           </button>
-          <button className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
+          <button
+            onClick={() => navigate(`/scripts/${id}/edit`)}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+          >
             <Edit3 size={12} /> Edit
           </button>
           <button className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
