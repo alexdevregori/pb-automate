@@ -4,7 +4,7 @@ import { clearToken } from '../lib/auth';
 
 const items = [
   { to: '/dashboard', label: 'Scripts', icon: Boxes,
-    matches: (p) => p.startsWith('/dashboard') || p.startsWith('/scripts') || p === '/picker' || p === '/configure' || p === '/deploy' || p === '/success' },
+    matches: (p) => p.startsWith('/dashboard') || p.startsWith('/scripts') },
   { to: '/activity', label: 'Activity', icon: Activity,
     matches: (p) => p.startsWith('/activity') },
   { to: '/settings', label: 'Settings', icon: Settings,

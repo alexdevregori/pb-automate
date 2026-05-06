@@ -83,12 +83,12 @@ router.get('/callback', async (req, res) => {
       { expiresIn: '24h' }
     );
 
-    // Redirect to frontend picker. If FRONTEND_URL is set use it (dev),
+    // Redirect to frontend dashboard. If FRONTEND_URL is set use it (dev),
     // otherwise use a same-origin relative redirect (prod: frontend served by this backend).
     const frontendUrl = process.env.FRONTEND_URL;
     const target = frontendUrl
-      ? `${frontendUrl}/picker?token=${sessionToken}`
-      : `/picker?token=${sessionToken}`;
+      ? `${frontendUrl}/dashboard?token=${sessionToken}`
+      : `/dashboard?token=${sessionToken}`;
     res.redirect(target);
   } catch (err) {
     const errData = err.response?.data || err.message;
