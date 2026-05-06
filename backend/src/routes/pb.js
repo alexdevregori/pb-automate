@@ -1,10 +1,18 @@
 /**
- * Routes that proxy to Productboard's API on behalf of the authenticated workspace.
+ * Routes that proxy to Productboard's V2 API on behalf of the authenticated workspace.
  *
- * Currently exposes:
- *   GET /api/pb/fields   list of fields available for sync (custom + curated built-ins),
- *                        intersected across feature + subfeature so we only show fields
- *                        that exist on both parents and children.
+ * GET /api/pb/fields
+ *   Query: ?parentType=product&childType[]=component&childType[]=feature
+ *   Returns the intersection of fields available on every type listed
+ *   (parentType + each childType), so the UI only shows fields that exist
+ *   on every entity involved in a sync.
+ *
+ *   Both parentType and childType[] are optional. If both omitted, returns
+ *   the intersection of `feature` and `subfeature` (the original default).
+ *
+ * GET /api/pb/hierarchy
+ *   Returns the static hierarchy table the UI uses to constrain the
+ *   parent-type / child-types pickers. Cheap and deterministic — no PB call.
  */
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
@@ -13,17 +21,25 @@ import { createPBClient } from '../services/pbClient.js';
 
 const router = Router();
 
-// Built-in fields the user can meaningfully sync. Anything else (e.g. `name`)
-// gets filtered out so we don't tempt users into overwriting things they shouldn't.
-const BUILTIN_ALLOWLIST = new Set([
-  'tags',
-  'health',
-  'timeframe',
-  'status',
-  'owner',
-]);
+// Built-in fields that are meaningful to sync. Anything not in this list and
+// not a UUID gets filtered out.
+const BUILTIN_ALLOWLIST = new Set(['tags', 'health', 'timeframe', 'status', 'owner']);
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+// Static hierarchy of valid parent → child relationships in the PB data model.
+// Drives the UI's child-type picker.
+const HIERARCHY = {
+  product:   ['component', 'feature', 'subfeature'],
+  component: ['component', 'feature', 'subfeature'],
+  feature:   ['subfeature'],
+  release:   ['initiative', 'feature', 'subfeature'],
+  objective: ['keyResult', 'objective', 'initiative', 'feature', 'subfeature'],
+};
+
+router.get('/hierarchy', requireAuth, (_req, res) => {
+  res.json({ hierarchy: HIERARCHY });
+});
 
 function fieldsFromConfig(configResponse) {
   const fields = configResponse?.data?.fields || {};
@@ -33,8 +49,8 @@ function fieldsFromConfig(configResponse) {
     const isAllowedBuiltin = BUILTIN_ALLOWLIST.has(key);
     if (!isCustom && !isAllowedBuiltin) continue;
     out.push({
-      key,                              // raw id (UUID for custom, slug for builtin)
-      name: def.name || key,            // human label
+      key,
+      name: def.name || key,
       kind: isCustom ? 'custom' : 'builtin',
       type: def.schema?.type || 'unknown',
     });
@@ -48,14 +64,28 @@ router.get('/fields', requireAuth, async (req, res) => {
   if (!token) {
     return res.status(401).json({ message: 'No PB token on file for this workspace.' });
   }
+
+  // Parse types from query.
+  const parentType = req.query.parentType;
+  let childTypes = req.query['childType'] || req.query['childType[]'];
+  if (typeof childTypes === 'string') childTypes = [childTypes];
+  if (!Array.isArray(childTypes)) childTypes = [];
+
+  // Default: feature + subfeature (matches earlier behavior of the endpoint
+  // before it was parameterized).
+  const types = parentType
+    ? Array.from(new Set([parentType, ...childTypes].filter(Boolean)))
+    : ['feature', 'subfeature'];
+
+  if (!types.length) {
+    return res.status(400).json({ message: 'No entity types specified.' });
+  }
+
   const pb = createPBClient(token);
 
-  let featureCfg, subfeatureCfg;
+  let configs;
   try {
-    [featureCfg, subfeatureCfg] = await Promise.all([
-      pb.getEntityConfiguration('feature'),
-      pb.getEntityConfiguration('subfeature'),
-    ]);
+    configs = await Promise.all(types.map((t) => pb.getEntityConfiguration(t)));
   } catch (err) {
     const status = err.response?.status || 500;
     const detail = err.response?.data || err.message;
@@ -67,21 +97,17 @@ router.get('/fields', requireAuth, async (req, res) => {
     });
   }
 
-  const featureFields = fieldsFromConfig(featureCfg);
-  const subfeatureFields = fieldsFromConfig(subfeatureCfg);
-
-  // Keep only fields that exist on BOTH entity types — same field-name-on-both-ends
-  // is what the syncField script requires.
-  const subNames = new Set(subfeatureFields.map((f) => f.name));
-  const intersection = featureFields
-    .filter((f) => subNames.has(f.name))
+  // Intersect across every type — only keep field NAMES that appear in all.
+  const perTypeFields = configs.map(fieldsFromConfig);
+  const nameSets = perTypeFields.map((arr) => new Set(arr.map((f) => f.name)));
+  const intersection = perTypeFields[0]
+    .filter((f) => nameSets.every((s) => s.has(f.name)))
     .sort((a, b) => {
-      // Built-ins first, then custom — within each group alphabetical.
       if (a.kind !== b.kind) return a.kind === 'builtin' ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
 
-  res.json({ fields: intersection });
+  res.json({ fields: intersection, types });
 });
 
 export default router;

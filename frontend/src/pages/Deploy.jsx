@@ -25,9 +25,10 @@ export default function Deploy({ scriptId, config, onSuccess }) {
           ['Schedule', config?.schedule || 'manual'],
         ]
       : [
-          ['Script', 'Sync Custom Field'],
-          ['Direction', 'Parent → Children'],
-          ['Field name', config?.fieldName || '(not set)'],
+          ['Script', 'Sync Field'],
+          ['From', config?.parentType || '(not set)'],
+          ['To', (config?.childTypes || []).join(', ') || '(none selected)'],
+          ['Field', config?.fieldName || '(not set)'],
           ['Mode', config?.dryRun ? 'Dry run (preview only)' : 'Live (writes to Productboard)'],
           ['Schedule', config?.schedule],
           ['Overwrite existing', config?.overwriteExisting ? 'Yes' : 'No'],

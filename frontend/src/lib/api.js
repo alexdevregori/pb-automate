@@ -51,6 +51,14 @@ export function deleteScript(id) {
   return request(`/scripts/${id}`, { method: 'DELETE' }).catch(() => ({}));
 }
 
-export function getAvailableFields() {
-  return request('/pb/fields');
+export function getAvailableFields({ parentType, childTypes } = {}) {
+  const params = new URLSearchParams();
+  if (parentType) params.set('parentType', parentType);
+  for (const t of childTypes || []) params.append('childType[]', t);
+  const qs = params.toString();
+  return request(`/pb/fields${qs ? `?${qs}` : ''}`);
+}
+
+export function getHierarchy() {
+  return request('/pb/hierarchy');
 }

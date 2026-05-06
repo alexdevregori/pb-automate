@@ -1,60 +1,170 @@
 import { useEffect, useState } from 'react';
 import SchedulePicker from '../components/SchedulePicker';
-import { getAvailableFields } from '../lib/api';
+import { getAvailableFields, getHierarchy } from '../lib/api';
+
+const TYPE_LABELS = {
+  product: 'Product',
+  component: 'Component',
+  feature: 'Feature',
+  subfeature: 'Sub-feature',
+  release: 'Release',
+  initiative: 'Initiative',
+  objective: 'Objective',
+  keyResult: 'Key Result',
+};
+
+const labelOf = (t) => TYPE_LABELS[t] || t;
 
 export default function Configure({ scriptId, onContinue }) {
+  // ---- countFeatures (no config beyond schedule) ----
+  if (scriptId === 'countFeatures') {
+    return <CountFeaturesConfigure onContinue={onContinue} />;
+  }
+
+  return <SyncFieldConfigure onContinue={onContinue} />;
+}
+
+function CountFeaturesConfigure({ onContinue }) {
+  const [schedule, setSchedule] = useState('manual');
+  return (
+    <div>
+      <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
+      <p className="mb-6 text-sm text-gray-500">
+        This is a read-only smoke test — no configuration needed. Pick a schedule and continue.
+      </p>
+      <div className="mb-6">
+        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Schedule</h3>
+        <SchedulePicker value={schedule} onChange={setSchedule} />
+      </div>
+      <button
+        onClick={() => onContinue({ config: { schedule } })}
+        className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90"
+      >
+        Review &amp; Deploy
+      </button>
+    </div>
+  );
+}
+
+function SyncFieldConfigure({ onContinue }) {
+  // Hierarchy + form state
+  const [hierarchy, setHierarchy] = useState(null);
+  const [hierarchyError, setHierarchyError] = useState(null);
+
+  const [parentType, setParentType] = useState('feature');
+  const [childTypes, setChildTypes] = useState([]); // multi-select
   const [fieldName, setFieldName] = useState('');
   const [schedule, setSchedule] = useState('manual');
   const [dryRun, setDryRun] = useState(true);
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [skipIfEmpty, setSkipIfEmpty] = useState(true);
 
-  // Fetch the available fields from PB so the user picks from a real list
-  // instead of typing. Falls back to a text input if the call fails.
-  const [fields, setFields] = useState(null);   // null = loading, [] = none, [...] = options
+  // Field list state
+  const [fields, setFields] = useState(null); // null=loading, []=none, [...]=options
   const [fieldsError, setFieldsError] = useState(null);
 
+  // 1. Load the hierarchy once.
   useEffect(() => {
-    if (scriptId !== 'syncField') return;
-    getAvailableFields()
+    getHierarchy()
+      .then((res) => {
+        setHierarchy(res.hierarchy);
+        const firstParent = Object.keys(res.hierarchy)[0];
+        setParentType(firstParent);
+        setChildTypes(res.hierarchy[firstParent] || []);
+      })
+      .catch((err) => setHierarchyError(err.message));
+  }, []);
+
+  // 2. When parentType changes, reset childTypes to all valid children of that parent.
+  useEffect(() => {
+    if (!hierarchy) return;
+    setChildTypes(hierarchy[parentType] || []);
+  }, [parentType, hierarchy]);
+
+  // 3. Re-fetch field list when parentType or childTypes change.
+  useEffect(() => {
+    if (!parentType || !childTypes.length) {
+      setFields([]);
+      return;
+    }
+    setFields(null); // loading
+    setFieldsError(null);
+    getAvailableFields({ parentType, childTypes })
       .then((res) => {
         const list = res.fields || [];
         setFields(list);
-        if (list.length && !fieldName) setFieldName(list[0].name);
+        // Keep current selection if still valid; otherwise pick first.
+        if (list.length && !list.some((f) => f.name === fieldName)) {
+          setFieldName(list[0].name);
+        }
+        if (!list.length) setFieldName('');
       })
-      .catch((err) => setFieldsError(err.message));
-  }, [scriptId]);
+      .catch((err) => {
+        setFieldsError(err.message);
+        setFields([]);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentType, childTypes.join('|')]);
 
-  // Smoke-test script has no configurable fields — show a minimal Configure screen.
-  if (scriptId === 'countFeatures') {
+  const validChildren = hierarchy ? hierarchy[parentType] || [] : [];
+  const canContinue = !!fieldName.trim() && childTypes.length > 0;
+
+  const toggleChildType = (t) => {
+    setChildTypes((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  };
+
+  if (hierarchyError) {
     return (
-      <div>
-        <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
-        <p className="mb-6 text-sm text-gray-500">
-          This is a read-only smoke test — no configuration needed. Pick a schedule and continue.
-        </p>
-
-        <div className="mb-6">
-          <h3 className="mb-3 text-sm font-semibold text-pb-dark">Schedule</h3>
-          <SchedulePicker value={schedule} onChange={setSchedule} />
-        </div>
-
-        <button
-          onClick={() => onContinue({ config: { schedule } })}
-          className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90"
-        >
-          Review &amp; Deploy
-        </button>
+      <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
+        Couldn't load hierarchy: {hierarchyError}
       </div>
     );
+  }
+  if (!hierarchy) {
+    return <div className="text-sm text-gray-500">Loading…</div>;
   }
 
   return (
     <div>
       <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
       <p className="mb-6 text-sm text-gray-500">
-        Pick a field and a schedule. The script copies that field's value from every parent feature down to its children.
+        Pick a parent entity type, the child types to sync into, and a field. The script copies the parent's value down to all matching descendants.
       </p>
+
+      <div className="mb-6">
+        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Parent type</h3>
+        <select
+          value={parentType}
+          onChange={(e) => setParentType(e.target.value)}
+          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
+        >
+          {Object.keys(hierarchy).map((t) => (
+            <option key={t} value={t}>{labelOf(t)}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="mb-6">
+        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Child types</h3>
+        <div className="space-y-2 rounded-lg border border-gray-200 p-3">
+          {validChildren.map((t) => (
+            <label key={t} className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={childTypes.includes(t)}
+                onChange={() => toggleChildType(t)}
+                className="h-4 w-4 rounded border-gray-300 text-pb-blue focus:ring-pb-blue"
+              />
+              <span className="text-sm text-gray-700">{labelOf(t)}</span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          The script walks descendants recursively, so picking only top-level types still reaches deep ones via their parents.
+        </p>
+      </div>
 
       <div className="mb-6">
         <h3 className="mb-3 text-sm font-semibold text-pb-dark">Field</h3>
@@ -68,16 +178,16 @@ export default function Configure({ scriptId, onContinue }) {
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
             />
             <p className="mt-1 text-xs text-amber-700">
-              Couldn't load field list from Productboard ({fieldsError}). Type the name manually — it must match exactly.
+              Couldn't load field list ({fieldsError}). Type the name manually.
             </p>
           </>
         ) : fields === null ? (
           <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
-            Loading fields from Productboard…
+            Loading fields…
           </div>
         ) : fields.length === 0 ? (
           <p className="text-xs text-gray-500">
-            No fields are available on both feature and sub-feature. Add a custom field to your workspace and try again.
+            No common fields found across the selected types. Pick at least one child type whose schema overlaps with the parent.
           </p>
         ) : (
           <>
@@ -88,13 +198,12 @@ export default function Configure({ scriptId, onContinue }) {
             >
               {fields.map((f) => (
                 <option key={f.key} value={f.name}>
-                  {f.name}
-                  {f.kind === 'custom' ? ' (custom)' : ''}
+                  {f.name}{f.kind === 'custom' ? ' (custom)' : ''}
                 </option>
               ))}
             </select>
             <p className="mt-1 text-xs text-gray-500">
-              Showing fields that exist on both feature and sub-feature in your workspace.
+              Showing fields that exist on every selected type.
             </p>
           </>
         )}
@@ -144,10 +253,12 @@ export default function Configure({ scriptId, onContinue }) {
       </div>
 
       <button
-        disabled={!fieldName.trim()}
+        disabled={!canContinue}
         onClick={() =>
           onContinue({
             config: {
+              parentType,
+              childTypes,
               fieldName,
               schedule,
               dryRun,

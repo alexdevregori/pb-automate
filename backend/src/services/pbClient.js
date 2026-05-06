@@ -2,19 +2,15 @@ import axios from 'axios';
 
 const PB_API_BASE = 'https://api.productboard.com';
 
+/**
+ * Productboard V2 API client.
+ *
+ * V2 unifies what V1 had as separate /features, /sub-features, etc. into a single
+ * /entities endpoint with type filtering. Custom fields are inline in each entity's
+ * `fields` map (keyed by UUID for custom fields, slug for built-ins like `status`).
+ */
 export function createPBClient(accessToken) {
-  // V1 client — uses X-Version: 1 header (no URL prefix).
-  const v1 = axios.create({
-    baseURL: PB_API_BASE,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'X-Version': '1',
-      'Content-Type': 'application/json',
-    },
-  });
-
-  // V2 client — uses /v2 URL prefix (no version header).
-  const v2 = axios.create({
+  const client = axios.create({
     baseURL: `${PB_API_BASE}/v2`,
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -23,133 +19,66 @@ export function createPBClient(accessToken) {
   });
 
   return {
-    async getFeatures(cursor) {
-      const params = cursor ? { pageCursor: cursor } : {};
-      const res = await v1.get('/features', { params });
-      return res.data;
-    },
+    /**
+     * List entities of one or more types. Paginates internally — returns ALL
+     * entities matching the type filter, walking pageCursor until exhausted.
+     *
+     * @param {string[]} types — e.g. ['feature', 'subfeature']
+     * @returns {Promise<Array>} flat list of entity records
+     */
+    async listAllEntities(types) {
+      if (!types?.length) return [];
+      const params = new URLSearchParams();
+      for (const t of types) params.append('type[]', t);
 
-    async getFeatureCustomFields(featureId) {
-      const res = await v1.get(`/features/${featureId}/custom-fields`);
-      return res.data;
-    },
-
-    async updateCustomField(featureId, fieldId, value) {
-      const res = await v1.patch(`/features/${featureId}/custom-fields/${fieldId}`, {
-        value,
-      });
-      return res.data;
-    },
-
-    async getFeature(featureId) {
-      const res = await v1.get(`/features/${featureId}`);
-      return res.data;
-    },
-
-    // V2: fetch the field schema for an entity type (e.g. 'feature', 'subfeature').
-    async getEntityConfiguration(entityType) {
-      const res = await v2.get(`/entities/configurations/${entityType}`);
-      return res.data;
-    },
-  };
-}
-
-// Mock client for local development without a real PB account
-export function createMockPBClient() {
-  const mockFeatures = [
-    {
-      id: 'feat-1',
-      name: 'User Authentication',
-      type: 'feature',
-      parent: null,
-      children: ['feat-2', 'feat-3'],
-    },
-    {
-      id: 'feat-2',
-      name: 'Login Flow',
-      type: 'sub-feature',
-      parent: 'feat-1',
-      children: [],
-    },
-    {
-      id: 'feat-3',
-      name: 'Registration Flow',
-      type: 'sub-feature',
-      parent: 'feat-1',
-      children: [],
-    },
-    {
-      id: 'feat-4',
-      name: 'Dashboard',
-      type: 'feature',
-      parent: null,
-      children: ['feat-5'],
-    },
-    {
-      id: 'feat-5',
-      name: 'Analytics Widget',
-      type: 'sub-feature',
-      parent: 'feat-4',
-      children: [],
-    },
-  ];
-
-  const mockFields = {
-    'feat-1': [
-      { id: 'cf-status', name: 'Status', value: 'In Progress' },
-      { id: 'cf-priority', name: 'Priority', value: 'High' },
-      { id: 'cf-effort', name: 'Effort', value: 8 },
-    ],
-    'feat-2': [
-      { id: 'cf-status', name: 'Status', value: 'Done' },
-      { id: 'cf-priority', name: 'Priority', value: 'High' },
-      { id: 'cf-effort', name: 'Effort', value: 3 },
-    ],
-    'feat-3': [
-      { id: 'cf-status', name: 'Status', value: null },
-      { id: 'cf-priority', name: 'Priority', value: 'Medium' },
-      { id: 'cf-effort', name: 'Effort', value: 5 },
-    ],
-    'feat-4': [
-      { id: 'cf-status', name: 'Status', value: 'Planning' },
-      { id: 'cf-priority', name: 'Priority', value: 'Medium' },
-      { id: 'cf-effort', name: 'Effort', value: 13 },
-    ],
-    'feat-5': [
-      { id: 'cf-status', name: 'Status', value: null },
-      { id: 'cf-priority', name: 'Priority', value: null },
-      { id: 'cf-effort', name: 'Effort', value: 5 },
-    ],
-  };
-
-  return {
-    async getFeatures() {
-      return { data: mockFeatures, totalResults: mockFeatures.length };
-    },
-
-    async getFeatureCustomFields(featureId) {
-      return { data: mockFields[featureId] || [] };
-    },
-
-    async updateCustomField(featureId, fieldId, value) {
-      const fields = mockFields[featureId];
-      if (fields) {
-        const field = fields.find((f) => f.id === fieldId);
-        if (field) {
-          const oldValue = field.value;
-          field.value = value;
-          return { data: { ...field, value }, oldValue };
+      let all = [];
+      let cursor = null;
+      let pages = 0;
+      do {
+        if (cursor) params.set('pageCursor', cursor);
+        const res = await client.get(`/entities?${params.toString()}`);
+        const data = res.data?.data || [];
+        all = all.concat(data);
+        // PB pagination: a `next` link in `links` or a top-level `pageCursor`.
+        // Try both for resilience.
+        const next = res.data?.links?.next;
+        if (next) {
+          // Extract pageCursor from the next URL.
+          const m = /[?&]pageCursor=([^&]+)/.exec(next);
+          cursor = m ? decodeURIComponent(m[1]) : null;
+        } else {
+          cursor = res.data?.pageCursor || null;
         }
-      }
-      return { data: null };
+        pages += 1;
+        if (pages > 100) break; // safety
+      } while (cursor);
+
+      return all;
     },
 
-    async getFeature(featureId) {
-      const feat = mockFeatures.find((f) => f.id === featureId);
-      return { data: feat || null };
+    /**
+     * Get a single entity with all configured fields and values.
+     */
+    async getEntity(id) {
+      const res = await client.get(`/entities/${id}`);
+      return res.data?.data;
     },
 
-    _mockFeatures: mockFeatures,
-    _mockFields: mockFields,
+    /**
+     * Patch an entity's fields. `fields` is a flat map of { fieldKey: value }
+     * where fieldKey is either a UUID (custom field) or a slug (built-in).
+     */
+    async updateEntityFields(id, fields) {
+      const res = await client.patch(`/entities/${id}`, { fields });
+      return res.data?.data;
+    },
+
+    /**
+     * Fetch the field schema for an entity type. Used to populate the field picker.
+     */
+    async getEntityConfiguration(entityType) {
+      const res = await client.get(`/entities/configurations/${entityType}`);
+      return res.data;
+    },
   };
 }

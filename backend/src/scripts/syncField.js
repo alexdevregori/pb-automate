@@ -1,155 +1,206 @@
 /**
- * Sync a custom field value from each parent feature down to its children.
+ * Sync a field value from each parent entity down to its descendants.
  *
- * Same-name field on both ends — the user picks one field name, and the script
- * copies its value from every parent that has children to those children.
+ * Generalized in V2 — works for any (parentType, childTypes) pair valid in PB's
+ * hierarchy. The script walks each parent's full descendant tree, stopping at
+ * any descendant that's also of the parent type (so cousins don't fight over
+ * the same descendant's value).
  *
  * Config shape:
  *   {
- *     fieldName: string,            // e.g. "Status"
- *     dryRun: boolean,              // if true, log what would change but don't write
- *     overwriteExisting: boolean,   // if false, skip children that already have a value
- *     skipIfEmpty: boolean,         // if true, don't propagate when the parent's value is blank
- *     schedule: string,             // 'manual' | 'hourly' | 'daily' | 'on-change'
+ *     parentType: string,           // e.g. 'product'
+ *     childTypes: string[],         // e.g. ['component', 'feature', 'subfeature']
+ *     fieldName: string,            // e.g. 'Status'  (the human name from /pb/fields)
+ *     dryRun: boolean,
+ *     overwriteExisting: boolean,
+ *     skipIfEmpty: boolean,
+ *     schedule: string,
  *   }
  */
 export async function runSyncField(pbClient, config, _workspaceId) {
   const logs = [];
   const log = (msg) => logs.push(msg);
 
+  const parentType = config.parentType || 'feature';
+  const childTypes = (config.childTypes || []).filter(Boolean);
   const fieldName = config.fieldName || 'Status';
   const dryRun = !!config.dryRun;
   const overwriteExisting = !!config.overwriteExisting;
-  const skipIfEmpty = config.skipIfEmpty !== false; // default true
+  const skipIfEmpty = config.skipIfEmpty !== false;
 
-  log(`Starting syncField — direction: parent → children`);
+  if (!childTypes.length) {
+    log('Error: no child types selected.');
+    return { logs, summary: 'No child types selected' };
+  }
+
+  log(`Starting syncField — ${parentType} → [${childTypes.join(', ')}]`);
   log(`Field: "${fieldName}"  ·  ${dryRun ? 'DRY RUN (no writes)' : 'LIVE'}`);
   log(`Options: overwriteExisting=${overwriteExisting}, skipIfEmpty=${skipIfEmpty}`);
 
-  // 1. Fetch every feature in the workspace.
-  let allFeatures = [];
-  let cursor = null;
-  let pages = 0;
-  do {
-    const res = await pbClient.getFeatures(cursor);
-    allFeatures = allFeatures.concat(res.data || []);
-    cursor = res.pageCursor || null;
-    pages += 1;
-    if (pages > 50) {
-      log(`Stopping after 50 pages (safety limit).`);
-      break;
-    }
-  } while (cursor);
+  // 1. Resolve the human field name → field key (UUID for custom, slug for built-in)
+  //    by reading the parent type's configuration.
+  let parentConfig;
+  try {
+    parentConfig = await pbClient.getEntityConfiguration(parentType);
+  } catch (err) {
+    log(`[ERROR] Could not load configuration for ${parentType}: ${err.message}`);
+    throw err;
+  }
+  const fieldsByName = Object.entries(parentConfig?.data?.fields || {})
+    .map(([key, def]) => ({ key, name: def.name || key }));
+  const matched = fieldsByName.find((f) => f.name === fieldName);
+  if (!matched) {
+    log(`[ERROR] Field "${fieldName}" not found on ${parentType}.`);
+    return { logs, summary: `Field "${fieldName}" not found` };
+  }
+  const fieldKey = matched.key;
+  log(`Resolved field "${fieldName}" → key ${fieldKey}`);
 
-  log(`Fetched ${allFeatures.length} features across ${pages} page(s).`);
+  // 2. Fetch all entities involved (parent + every child type).
+  //    We need them all in memory to build the tree.
+  const allTypes = Array.from(new Set([parentType, ...childTypes]));
+  const all = await pbClient.listAllEntities(allTypes);
+  log(`Fetched ${all.length} entit${all.length === 1 ? 'y' : 'ies'} across ${allTypes.join(', ')}.`);
 
-  // 2. Build a parent → [children] map. PB's feature shape can have either
-  //    `parent: 'feat-1'` or `parent: { id: 'feat-1' }` depending on the API
-  //    revision, so handle both.
-  const parentIdOf = (f) => (typeof f.parent === 'string' ? f.parent : f.parent?.id) || null;
-  const parentToChildren = new Map();
-  for (const f of allFeatures) {
-    const pid = parentIdOf(f);
-    if (!pid) continue;
-    const children = parentToChildren.get(pid) || [];
-    children.push(f);
-    parentToChildren.set(pid, children);
+  if (!all.length) {
+    return { logs, summary: 'No entities found' };
   }
 
-  const parents = allFeatures.filter((f) => parentToChildren.has(f.id));
-  log(`Found ${parents.length} parent feature(s) with at least one child.`);
+  // 3. Diagnostic dump: first entity's shape, truncated. Helps verify the
+  //    fields/relationships layout is what we expect.
+  const sample = JSON.stringify(all[0]).slice(0, 400);
+  log(`[diag] first entity shape: ${sample}${sample.length >= 400 ? '…' : ''}`);
 
-  // 3. Walk each parent. Diagnostic dump on the first parent so we can verify
-  //    the custom-fields response shape against what this code assumes.
+  // 4. Build maps. Parent relationship is in entity.relationships array.
+  const byId = new Map(all.map((e) => [e.id, e]));
+  const parentIdOf = (e) => {
+    const rels = Array.isArray(e.relationships) ? e.relationships : [];
+    const parentRel = rels.find((r) => r.type === 'parent');
+    return parentRel?.target?.id || null;
+  };
+  const childrenOf = new Map(); // parentId → child entities
+  for (const e of all) {
+    const pid = parentIdOf(e);
+    if (!pid) continue;
+    const list = childrenOf.get(pid) || [];
+    list.push(e);
+    childrenOf.set(pid, list);
+  }
+
+  const parents = all.filter((e) => e.type === parentType);
+  log(`Found ${parents.length} ${parentType}(s).`);
+
+  const childTypeSet = new Set(childTypes);
   let plannedUpdates = 0;
   let appliedUpdates = 0;
   let skipped = 0;
-  let firstShapeLogged = false;
 
+  // 5. Walk each parent's descendant tree, stop expanding at any descendant
+  //    that's itself of parentType (so nested parents own their own subtrees).
   for (const parent of parents) {
-    const children = parentToChildren.get(parent.id) || [];
+    const sourceValue = parent.fields?.[fieldKey];
+    const parentName = parent.fields?.name || parent.id;
 
-    let parentFieldsRes;
-    try {
-      parentFieldsRes = await pbClient.getFeatureCustomFields(parent.id);
-    } catch (err) {
-      log(`[ERROR] Could not fetch custom fields for parent ${parent.id}: ${err.message}`);
-      skipped += children.length;
-      continue;
-    }
-
-    if (!firstShapeLogged) {
-      // One-time diagnostic — first custom-fields response shape, truncated.
-      const sample = JSON.stringify(parentFieldsRes).slice(0, 240);
-      log(`[diag] first custom-fields response: ${sample}${sample.length >= 240 ? '…' : ''}`);
-      firstShapeLogged = true;
-    }
-
-    const parentField = (parentFieldsRes.data || []).find((f) => f.name === fieldName);
-    if (!parentField) {
-      log(`[SKIP] ${parent.name || parent.id}: field "${fieldName}" not found on parent`);
-      skipped += children.length;
-      continue;
-    }
-
-    const sourceValue = parentField.value;
     if (skipIfEmpty && (sourceValue === null || sourceValue === '' || sourceValue === undefined)) {
-      log(`[SKIP] ${parent.name || parent.id}: parent's "${fieldName}" is empty`);
-      skipped += children.length;
+      log(`[SKIP] ${parentType} "${parentName}": "${fieldName}" is empty`);
       continue;
     }
 
-    for (const child of children) {
-      let childFieldsRes;
-      try {
-        childFieldsRes = await pbClient.getFeatureCustomFields(child.id);
-      } catch (err) {
-        log(`[ERROR] Could not fetch custom fields for child ${child.id}: ${err.message}`);
-        skipped++;
-        continue;
+    // BFS, stop expanding nested parent-type entities.
+    const queue = [...(childrenOf.get(parent.id) || [])];
+    const seen = new Set();
+    while (queue.length) {
+      const node = queue.shift();
+      if (!node || seen.has(node.id)) continue;
+      seen.add(node.id);
+
+      const nodeIsParentType = node.type === parentType;
+      const nodeMatchesChildType = childTypeSet.has(node.type);
+
+      if (nodeMatchesChildType) {
+        // Apply (or plan) the update.
+        const existing = node.fields?.[fieldKey];
+        const nodeName = node.fields?.name || node.id;
+
+        if (deepEqual(existing, sourceValue)) {
+          skipped++;
+        } else {
+          const hasValue = existing !== null && existing !== '' && existing !== undefined;
+          if (hasValue && !overwriteExisting) {
+            log(`[SKIP] ${node.type} "${nodeName}": existing value preserved`);
+            skipped++;
+          } else if (dryRun) {
+            log(`[DRY-RUN] ${node.type} "${nodeName}": would set "${fieldName}" ${fmt(existing)} → ${fmt(sourceValue)}`);
+            plannedUpdates++;
+          } else {
+            try {
+              await pbClient.updateEntityFields(node.id, { [fieldKey]: sourceValue });
+              log(`[SYNC] ${node.type} "${nodeName}": ${fieldName} ${fmt(existing)} → ${fmt(sourceValue)}`);
+              appliedUpdates++;
+            } catch (err) {
+              const detail = err.response?.data ? JSON.stringify(err.response.data).slice(0, 160) : err.message;
+              log(`[ERROR] ${node.type} "${nodeName}": update failed — ${detail}`);
+              skipped++;
+            }
+          }
+        }
       }
 
-      const childField = (childFieldsRes.data || []).find((f) => f.name === fieldName);
-      if (!childField) {
-        log(`[SKIP] ${child.name || child.id}: field "${fieldName}" not found on child`);
-        skipped++;
-        continue;
-      }
-
-      if (childField.value === sourceValue) {
-        skipped++;
-        continue;
-      }
-
-      const childHasValue = childField.value !== null && childField.value !== '' && childField.value !== undefined;
-      if (childHasValue && !overwriteExisting) {
-        log(`[SKIP] ${child.name || child.id}: existing value "${childField.value}" preserved`);
-        skipped++;
-        continue;
-      }
-
-      if (dryRun) {
-        log(`[DRY-RUN] ${child.name || child.id}: would set "${fieldName}" "${childField.value ?? ''}" → "${sourceValue}"`);
-        plannedUpdates++;
-        continue;
-      }
-
-      try {
-        await pbClient.updateCustomField(child.id, childField.id, sourceValue);
-        log(`[SYNC] ${child.name || child.id}: ${fieldName} "${childField.value ?? ''}" → "${sourceValue}"`);
-        appliedUpdates++;
-      } catch (err) {
-        log(`[ERROR] ${child.name || child.id}: update failed — ${err.message}`);
-        skipped++;
-      }
+      // Stop expanding if this node is itself a parent-type entity — its subtree
+      // belongs to it, not to the outer parent.
+      if (nodeIsParentType) continue;
+      const grandchildren = childrenOf.get(node.id) || [];
+      queue.push(...grandchildren);
     }
   }
 
   if (dryRun) {
     log(`Dry-run complete: would update ${plannedUpdates}, skip ${skipped}.`);
-    return { logs, summary: `Would update ${plannedUpdates} features (dry run)` };
+    return { logs, summary: `Would update ${plannedUpdates} entities (dry run)` };
   }
-
   log(`Completed: ${appliedUpdates} updated, ${skipped} skipped.`);
-  return { logs, summary: `${appliedUpdates} features synced` };
+  return { logs, summary: `${appliedUpdates} entities synced` };
+}
+
+/** Format a value for human-readable logs. Truncates long strings. */
+function fmt(v) {
+  if (v === null || v === undefined) return '∅';
+  if (typeof v === 'string') return `"${v.length > 40 ? v.slice(0, 40) + '…' : v}"`;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  // For objects (e.g. status, owner) just show id and/or name.
+  if (typeof v === 'object') {
+    if (Array.isArray(v)) return `[${v.length} item${v.length === 1 ? '' : 's'}]`;
+    const id = v.id ? v.id.slice(0, 8) : null;
+    const name = v.name || null;
+    if (name && id) return `{${name} · ${id}}`;
+    if (name) return `{${name}}`;
+    if (id) return `{${id}}`;
+    return JSON.stringify(v).slice(0, 60);
+  }
+  return String(v);
+}
+
+/** Shallow-ish deep equality good enough for PB field values. */
+function deepEqual(a, b) {
+  if (a === b) return true;
+  if (a == null || b == null) return false;
+  if (typeof a !== typeof b) return false;
+  if (typeof a !== 'object') return false;
+  // For object fields like status/owner, compare by id.
+  if (a.id && b.id) return a.id === b.id;
+  // For arrays of refs (tags, teams), compare sets of ids.
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    const aIds = new Set(a.map((x) => x?.id).filter(Boolean));
+    const bIds = new Set(b.map((x) => x?.id).filter(Boolean));
+    if (aIds.size !== bIds.size) return false;
+    for (const id of aIds) if (!bIds.has(id)) return false;
+    return true;
+  }
+  // Fallback: JSON compare.
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
