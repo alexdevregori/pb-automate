@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { Play, MoreHorizontal, Edit3 } from 'lucide-react';
+import { Play, MoreHorizontal, Edit3, Pause, RotateCcw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { getScript, runScript } from '../lib/api';
+import { getScript, runScript, pauseScript, deleteScript } from '../lib/api';
 import StatusDot from '../components/StatusDot';
 import StatusBadge from '../components/StatusBadge';
 import RunRow from '../components/RunRow';
@@ -16,6 +16,9 @@ export default function ScriptDetail() {
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [running, setRunning] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
 
   const load = () =>
     getScript(id)
@@ -28,6 +31,16 @@ export default function ScriptDetail() {
   useEffect(() => {
     load();
   }, [id]);
+
+  // Close kebab menu on outside click.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   if (error) return <div className="text-sm text-red-600">{error}</div>;
   if (!data) return <div className="text-sm text-gray-500">Loading…</div>;
@@ -46,6 +59,37 @@ export default function ScriptDetail() {
       toast.error(`Run failed: ${e.message}`);
     } finally {
       setRunning(false);
+    }
+  };
+
+  const handlePauseToggle = async () => {
+    setMenuOpen(false);
+    setBusy(true);
+    try {
+      const next = !data.deployment.paused;
+      await pauseScript(id, next);
+      toast.success(next ? 'Paused' : 'Resumed');
+      await load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setMenuOpen(false);
+    if (!window.confirm(`Delete this ${data.deployment.scriptId} deployment? This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteScript(id);
+      toast.success('Deleted');
+      navigate('/dashboard');
+    } catch (err) {
+      toast.error(err.message);
+      setBusy(false);
     }
   };
 
@@ -83,9 +127,33 @@ export default function ScriptDetail() {
           >
             <Edit3 size={12} /> Edit
           </button>
-          <button className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
-            <MoreHorizontal size={12} />
-          </button>
+          <div className="relative" ref={menuRef}>
+            <button
+              onClick={() => setMenuOpen((o) => !o)}
+              disabled={busy}
+              aria-label="More actions"
+              className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            >
+              <MoreHorizontal size={12} />
+            </button>
+            {menuOpen && (
+              <div className="absolute right-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border border-gray-200 bg-white text-xs shadow-md">
+                <button
+                  onClick={handlePauseToggle}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+                >
+                  {deployment.paused ? <RotateCcw size={12} /> : <Pause size={12} />}
+                  {deployment.paused ? 'Resume' : 'Pause'}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={12} /> Delete deployment
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
