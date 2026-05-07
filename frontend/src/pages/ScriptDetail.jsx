@@ -79,7 +79,7 @@ export default function ScriptDetail() {
           </button>
           <button
             onClick={() => navigate(`/scripts/${id}/edit`)}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2.5 py-1.5 text-xs text-gray-600 hover:bg-gray-50"
+            className="inline-flex items-center gap-1 rounded-md border border-pb-blue/30 bg-pb-blue/5 px-2.5 py-1.5 text-xs font-semibold text-pb-blue transition-colors hover:bg-pb-blue/10"
           >
             <Edit3 size={12} /> Edit
           </button>
