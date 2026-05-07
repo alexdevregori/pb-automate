@@ -120,6 +120,14 @@ router.post('/:id/run', requireAuth, async (req, res) => {
     return res.status(404).json({ message: 'Deployment not found' });
   }
 
+  // Diagnostic — show exactly what config is being used.
+  console.log(
+    `[run] ${deployment.scriptId} (${req.params.id.slice(0, 8)}) ` +
+    `dryRun=${deployment.config?.dryRun} ` +
+    `overwrite=${deployment.config?.overwriteExisting} ` +
+    `field="${deployment.config?.fieldName}"`
+  );
+
   const pbClient = createPBClient(await getToken(workspaceId));
   const run = await runAndPersist(deployment, pbClient, workspaceId);
   res.json({ run });

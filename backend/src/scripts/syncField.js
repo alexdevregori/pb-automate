@@ -94,6 +94,7 @@ export async function runSyncField(pbClient, config, _workspaceId) {
   let plannedUpdates = 0;
   let appliedUpdates = 0;
   let skipped = 0;
+  let parentsSkippedEmpty = 0;
 
   // 5. Walk each parent's descendant tree, stop expanding at any descendant
   //    that's itself of parentType (so nested parents own their own subtrees).
@@ -103,6 +104,7 @@ export async function runSyncField(pbClient, config, _workspaceId) {
 
     if (skipIfEmpty && (sourceValue === null || sourceValue === '' || sourceValue === undefined)) {
       log(`[SKIP] ${parentType} "${parentName}": "${fieldName}" is empty`);
+      parentsSkippedEmpty++;
       continue;
     }
 
@@ -154,12 +156,23 @@ export async function runSyncField(pbClient, config, _workspaceId) {
     }
   }
 
+  const tail = parentsSkippedEmpty > 0
+    ? ` · ${parentsSkippedEmpty}/${parents.length} ${parentType}(s) had no value to propagate`
+    : '';
+
   if (dryRun) {
-    log(`Dry-run complete: would update ${plannedUpdates}, skip ${skipped}.`);
-    return { logs, summary: `Would update ${plannedUpdates} entities (dry run)` };
+    log(`Dry-run complete: would update ${plannedUpdates}, skip ${skipped}${tail ? ',' + tail : ''}.`);
+    const summaryTail = parentsSkippedEmpty === parents.length && parents.length > 0
+      ? ` (no ${parentType}s had a value)`
+      : '';
+    return { logs, summary: `Would update ${plannedUpdates} entities (dry run)${summaryTail}` };
   }
-  log(`Completed: ${appliedUpdates} updated, ${skipped} skipped.`);
-  return { logs, summary: `${appliedUpdates} entities synced` };
+
+  log(`Completed: ${appliedUpdates} updated, ${skipped} descendant(s) skipped${tail}.`);
+  const summaryTail = parentsSkippedEmpty === parents.length && parents.length > 0
+    ? ` (no ${parentType}s had a value)`
+    : '';
+  return { logs, summary: `${appliedUpdates} entities synced${summaryTail}` };
 }
 
 /** Format a value for human-readable logs. Truncates long strings. */
