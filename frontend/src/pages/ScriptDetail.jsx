@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Play, MoreHorizontal, Edit3 } from 'lucide-react';
 import { toast } from 'sonner';
 import { getScript, runScript } from '../lib/api';
@@ -11,6 +11,7 @@ import { relativeTime } from '../lib/relativeTime';
 
 export default function ScriptDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
