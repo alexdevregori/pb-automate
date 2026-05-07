@@ -31,7 +31,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
-      <Toaster position="top-right" richColors />
+      <Toaster position="bottom-right" richColors />
     </>
   </React.StrictMode>
 );
