@@ -137,19 +137,19 @@ export default function ScriptDetail() {
               <MoreHorizontal size={12} />
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-full z-10 mt-1 w-44 overflow-hidden rounded-md border border-gray-200 bg-white text-xs shadow-md">
+              <div className="absolute right-0 top-full z-10 mt-1 w-36 overflow-hidden rounded-md border border-gray-200 bg-white text-xs font-semibold shadow-md">
                 <button
                   onClick={handlePauseToggle}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+                  className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-gray-700 hover:bg-gray-50"
                 >
                   {deployment.paused ? <RotateCcw size={12} /> : <Pause size={12} />}
                   {deployment.paused ? 'Resume' : 'Pause'}
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left text-red-600 hover:bg-red-50"
+                  className="flex w-full items-center gap-1.5 border-t border-gray-100 px-2.5 py-1.5 text-left text-red-600 hover:bg-red-50"
                 >
-                  <Trash2 size={12} /> Delete deployment
+                  <Trash2 size={12} /> Delete
                 </button>
               </div>
             )}
