@@ -108,9 +108,20 @@ export default function ScriptDetail() {
             <h1 className="text-base font-bold text-pb-dark">{deployment.scriptId}</h1>
             <StatusBadge status={status} />
           </div>
-          <div className="text-xs text-gray-500">
-            {deployment.schedule}
-            {selected && ` · last ran ${relativeTime(selected.startedAt)}`}
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            {deployment.scriptId === 'syncField' && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                  deployment.config?.dryRun
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-emerald-50 text-emerald-700'
+                }`}
+              >
+                {deployment.config?.dryRun ? 'DRY RUN' : 'LIVE'}
+              </span>
+            )}
+            <span>{deployment.schedule}</span>
+            {selected && <span>· last ran {relativeTime(selected.startedAt)}</span>}
           </div>
         </div>
         <div className="flex gap-1.5">
