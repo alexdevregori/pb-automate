@@ -90,6 +90,17 @@ export async function runSyncField(pbClient, config, _workspaceId) {
   const parents = all.filter((e) => e.type === parentType);
   log(`Found ${parents.length} ${parentType}(s).`);
 
+  // Diagnostic — dump the field keys present on the first parent.
+  // This tells us whether the V2 list endpoint actually returns custom
+  // fields on the parent entity, or if we need to fetch each parent
+  // individually via GET /v2/entities/{id} to see them.
+  if (parents.length) {
+    const firstParent = parents[0];
+    const fieldKeys = Object.keys(firstParent.fields || {});
+    log(`[diag] first ${parentType} ("${firstParent.fields?.name}") has field keys: ${fieldKeys.join(', ')}`);
+    log(`[diag] looking for key ${fieldKey}: ${fieldKeys.includes(fieldKey) ? 'PRESENT' : 'MISSING'}`);
+  }
+
   const childTypeSet = new Set(childTypes);
   let plannedUpdates = 0;
   let appliedUpdates = 0;
