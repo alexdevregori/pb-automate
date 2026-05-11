@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { Play, MoreHorizontal, Edit3, Pause, RotateCcw, Trash2 } from 'lucide-react';
+import { Play, MoreHorizontal, Edit3, Pause, RotateCcw, Trash2, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { getScript, runScript, pauseScript, deleteScript } from '../lib/api';
 import StatusDot from '../components/StatusDot';
@@ -18,6 +18,7 @@ export default function ScriptDetail() {
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const menuRef = useRef(null);
 
   const load = () =>
@@ -31,6 +32,11 @@ export default function ScriptDetail() {
   useEffect(() => {
     load();
   }, [id]);
+
+  // Reset "Copied" indicator when the selected run changes.
+  useEffect(() => {
+    setCopied(false);
+  }, [selectedId]);
 
   // Close kebab menu on outside click.
   useEffect(() => {
@@ -200,9 +206,26 @@ export default function ScriptDetail() {
                   </span>
                   <StatusBadge status={selected.status} />
                 </div>
-                <span className="text-[10px] text-gray-500">
-                  {(selected.durationMs / 1000).toFixed(1)}s
-                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(selected.logs.join('\n'));
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 1500);
+                      } catch {
+                        toast.error('Copy failed');
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
+                  >
+                    {copied ? <Check size={10} /> : <Copy size={10} />}
+                    {copied ? 'Copied' : 'Copy logs'}
+                  </button>
+                  <span className="text-[10px] text-gray-500">
+                    {(selected.durationMs / 1000).toFixed(1)}s
+                  </span>
+                </div>
               </div>
               <div className="min-h-0 flex-1">
                 <LogPane logs={selected.logs} />

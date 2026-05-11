@@ -67,9 +67,10 @@ export function createPBClient(accessToken) {
     /**
      * Patch an entity's fields. `fields` is a flat map of { fieldKey: value }
      * where fieldKey is either a UUID (custom field) or a slug (built-in).
+     * PB V2 wraps the request body in a top-level `data` envelope.
      */
     async updateEntityFields(id, fields) {
-      const res = await client.patch(`/entities/${id}`, { fields });
+      const res = await client.patch(`/entities/${id}`, { data: { fields } });
       return res.data?.data;
     },
 
