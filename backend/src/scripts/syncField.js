@@ -181,7 +181,7 @@ export async function runSyncField(pbClient, config, _workspaceId) {
             plannedUpdates++;
           } else {
             try {
-              await pbClient.updateEntityFields(node.id, { [fieldKey]: sourceValue });
+              await pbClient.updateEntityFields(node.id, { [fieldKey]: patchValue(sourceValue) });
               log(`[SYNC] ${node.type} "${nodeName}": ${fieldName} ${fmt(existing)} → ${fmt(sourceValue)}`);
               appliedUpdates++;
             } catch (err) {
@@ -218,6 +218,26 @@ export async function runSyncField(pbClient, config, _workspaceId) {
     ? ` (no ${parentType}s had a value)`
     : '';
   return { logs, summary: `${appliedUpdates} entities synced${summaryTail}` };
+}
+
+/**
+ * Strip an entity reference down to what PB accepts in a PATCH body.
+ *
+ * Entity references in PB list/get responses are full objects like
+ *   { id, name, links: {...} }
+ * but PB's PATCH endpoint rejects unknown attributes on custom fields with
+ *   "Unknown attribute 'name' in field with ID '<uuid>'"
+ * So before sending, narrow object values to just { id } (or { email } for
+ * user refs that don't have ids, as a fallback).
+ */
+function patchValue(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(patchValue);
+  if (value.id) return { id: value.id };
+  if (value.email) return { email: value.email };
+  if (value.name) return { name: value.name };
+  return value;
 }
 
 /** Format a value for human-readable logs. Truncates long strings. */
