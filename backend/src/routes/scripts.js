@@ -5,17 +5,16 @@ import { saveDeployment, getDeployments, getDeployment, saveRunLog, getRunLogs, 
 import { getToken } from '../services/secretManager.js';
 import { createPBClient } from '../services/pbClient.js';
 import { runSyncField } from '../scripts/syncField.js';
-import { runCountFeatures } from '../scripts/countFeatures.js';
 import { capture } from '../services/analytics.js';
 
 const router = Router();
 
+const sid = (req) => {
+  const s = req.headers['x-ph-session-id'];
+  return s ? { $session_id: s } : {};
+};
+
 const AVAILABLE_SCRIPTS = [
-  {
-    id: 'countFeatures',
-    name: 'Count Features (Smoke Test)',
-    description: 'Read-only: counts features in your workspace. Use to verify the deploy pipeline works.',
-  },
   {
     id: 'syncField',
     name: 'Sync Custom Field',
@@ -35,7 +34,6 @@ const AVAILABLE_SCRIPTS = [
 
 async function executeScript(scriptId, pbClient, config, workspaceId) {
   if (scriptId === 'syncField') return runSyncField(pbClient, config, workspaceId);
-  if (scriptId === 'countFeatures') return runCountFeatures(pbClient, config, workspaceId);
   throw new Error(`No runner registered for scriptId="${scriptId}"`);
 }
 
@@ -47,9 +45,11 @@ async function runAndPersist(deployment, pbClient, workspaceId) {
     const { logs, summary } = await executeScript(
       deployment.scriptId, pbClient, deployment.config, workspaceId
     );
+    const errorCount = logs.filter((l) => l.startsWith('[ERROR]')).length;
     const run = {
-      runId, deploymentId: deployment.id, status: 'ok', startedAt,
-      durationMs: Date.now() - t0, summary, logs,
+      runId, deploymentId: deployment.id,
+      status: errorCount > 0 ? 'partial' : 'ok',
+      startedAt, durationMs: Date.now() - t0, summary, logs, errorCount,
     };
     await saveRunLog(workspaceId, run);
     return run;
@@ -89,13 +89,15 @@ router.get('/', requireAuth, async (req, res) => {
 // POST /scripts/deploy — save config and run immediately
 router.post('/deploy', requireAuth, async (req, res) => {
   const { scriptId, ...config } = req.body;
+  const { name, ...scriptConfig } = config;
   const deploymentId = uuidv4();
   const workspaceId = req.workspace.workspaceId;
 
   const deployment = {
     id: deploymentId,
     scriptId,
-    config,
+    name: name || scriptId,
+    config: scriptConfig,
     workspaceId,
     status: 'active',
     schedule: config.schedule || 'manual',
@@ -114,6 +116,7 @@ router.post('/deploy', requireAuth, async (req, res) => {
     schedule: deployment.schedule,
     dryRun: !!config?.dryRun,
     firstRunStatus: run.status,
+    ...sid(req),
   });
 
   res.json({ deployment, run });
@@ -145,6 +148,7 @@ router.post('/:id/run', requireAuth, async (req, res) => {
     status: run.status,
     durationMs: run.durationMs,
     dryRun: !!deployment.config?.dryRun,
+    ...sid(req),
   });
 
   res.json({ run });
@@ -170,12 +174,14 @@ router.patch('/:id', requireAuth, async (req, res) => {
     capture(req.body.paused ? 'script_paused' : 'script_resumed', workspaceId, {
       scriptId: updated.scriptId,
       deploymentId: updated.id,
+      ...sid(req),
     });
   } else {
     capture('script_updated', workspaceId, {
       scriptId: updated.scriptId,
       deploymentId: updated.id,
       patchedKeys: Object.keys(req.body || {}),
+      ...sid(req),
     });
   }
   res.json(updated);
@@ -185,7 +191,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
 router.delete('/:id', requireAuth, async (req, res) => {
   const workspaceId = req.workspace.workspaceId;
   await deleteDeployment(workspaceId, req.params.id);
-  capture('script_deleted', workspaceId, { deploymentId: req.params.id });
+  capture('script_deleted', workspaceId, { deploymentId: req.params.id, ...sid(req) });
   res.status(204).end();
 });
 

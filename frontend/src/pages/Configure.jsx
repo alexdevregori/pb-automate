@@ -2,38 +2,51 @@ import { useEffect, useRef, useState } from 'react';
 import SchedulePicker from '../components/SchedulePicker';
 import { getAvailableFields, getHierarchy } from '../lib/api';
 
+function deriveFieldType(schema = {}) {
+  if (schema.required?.includes('id') && schema.required?.includes('email')) return 'Member';
+  if (schema.type === 'string' && schema.format === 'date') return 'Date';
+  if (schema.type === 'string' && schema.constraints?.maxLength === 1048576) return 'Description';
+  if (schema.type === 'string') return 'Text';
+  if (schema.type === 'array') return 'Multi-select';
+  if (schema.type === 'object') return 'Single select';
+  if (schema.type === 'number' || schema.type === 'integer') return 'Number';
+  return schema.type ? schema.type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Other';
+}
+
+function groupFields(fields) {
+  const grouped = new Map();
+  for (const f of fields) {
+    const type = deriveFieldType(f.schema);
+    if (!grouped.has(type)) grouped.set(type, []);
+    grouped.get(type).push(f);
+  }
+  return [...grouped.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([type, groupFields]) => ({
+      type,
+      fields: [...groupFields].sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+}
+
 const TYPE_LABELS = {
-  product: 'Product',
-  component: 'Component',
-  feature: 'Feature',
-  subfeature: 'Sub-feature',
-  release: 'Release',
-  initiative: 'Initiative',
-  objective: 'Objective',
-  keyResult: 'Key Result',
+  product: 'Product', component: 'Component', feature: 'Feature',
+  subfeature: 'Sub-feature', release: 'Release', initiative: 'Initiative',
+  objective: 'Objective', keyResult: 'Key Result',
 };
 
 const labelOf = (t) => TYPE_LABELS[t] || t;
 
+const inputCls = 'w-full rounded-lg border border-pb-dark/[0.14] bg-white px-3 py-2.5 text-[13.5px] text-pb-dark transition-all placeholder:text-pb-subtle focus:border-pb-dark focus:outline-none focus:ring-2 focus:ring-pb-dark/[0.08]';
+const sectionHeadCls = 'mb-2 block text-[12.5px] font-medium text-pb-dark';
+
 /**
- * Reusable configuration form.
- *
  * Props:
- *   scriptId       — 'countFeatures' or 'syncField'
- *   onContinue     — called with { config } when the user clicks the submit button
- *   initialConfig  — optional, prefills the form (used by ScriptEdit)
- *   submitLabel    — optional, defaults to 'Review & Deploy'
+ *   scriptId       — 'syncField'
+ *   onContinue     — called with { config }
+ *   initialConfig  — optional prefill (ScriptEdit)
+ *   submitLabel    — defaults to 'Preview run'
  */
 export default function Configure({ scriptId, onContinue, initialConfig, submitLabel }) {
-  if (scriptId === 'countFeatures') {
-    return (
-      <CountFeaturesConfigure
-        initialConfig={initialConfig}
-        onContinue={onContinue}
-        submitLabel={submitLabel}
-      />
-    );
-  }
   return (
     <SyncFieldConfigure
       initialConfig={initialConfig}
@@ -43,33 +56,11 @@ export default function Configure({ scriptId, onContinue, initialConfig, submitL
   );
 }
 
-function CountFeaturesConfigure({ initialConfig, onContinue, submitLabel = 'Review & Deploy' }) {
-  const [schedule, setSchedule] = useState(initialConfig?.schedule || 'manual');
-  return (
-    <div>
-      <h2 className="mb-1 text-xl font-bold text-pb-dark">Configure Script</h2>
-      <p className="mb-6 text-sm text-gray-500">
-        This is a read-only smoke test — no configuration needed. Pick a schedule and continue.
-      </p>
-      <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Schedule</h3>
-        <SchedulePicker value={schedule} onChange={setSchedule} />
-      </div>
-      <button
-        onClick={() => onContinue({ config: { schedule } })}
-        className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90"
-      >
-        {submitLabel}
-      </button>
-    </div>
-  );
-}
-
-function SyncFieldConfigure({ initialConfig, onContinue, submitLabel = 'Review & Deploy' }) {
+function SyncFieldConfigure({ initialConfig, onContinue, submitLabel = 'Preview run' }) {
   const [hierarchy, setHierarchy] = useState(null);
   const [hierarchyError, setHierarchyError] = useState(null);
 
-  // Form state — initialized from initialConfig if provided.
+  const [name, setName] = useState(initialConfig?.name || '');
   const [parentType, setParentType] = useState(initialConfig?.parentType || 'feature');
   const [childTypes, setChildTypes] = useState(initialConfig?.childTypes || []);
   const [fieldName, setFieldName] = useState(initialConfig?.fieldName || '');
@@ -80,18 +71,14 @@ function SyncFieldConfigure({ initialConfig, onContinue, submitLabel = 'Review &
 
   const [fields, setFields] = useState(null);
   const [fieldsError, setFieldsError] = useState(null);
+  const [fieldsRefreshKey, setFieldsRefreshKey] = useState(0);
 
-  // Tracks whether the user has explicitly changed the parent dropdown.
-  // Used to gate the "reset childTypes when parent changes" effect so we
-  // don't wipe a saved selection on initial mount when editing.
   const userChangedParent = useRef(false);
 
-  // 1. Load hierarchy once.
   useEffect(() => {
     getHierarchy()
       .then((res) => {
         setHierarchy(res.hierarchy);
-        // No initial config? Pick the first valid parent type as a default.
         if (!initialConfig) {
           const firstParent = Object.keys(res.hierarchy)[0];
           setParentType(firstParent);
@@ -102,185 +89,211 @@ function SyncFieldConfigure({ initialConfig, onContinue, submitLabel = 'Review &
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 2. When the user changes parentType (after mount), reset childTypes
-  //    to that parent's full set of valid children.
   useEffect(() => {
     if (!hierarchy || !userChangedParent.current) return;
     setChildTypes(hierarchy[parentType] || []);
   }, [parentType, hierarchy]);
 
-  // 3. Re-fetch fields whenever parent or child types change.
   useEffect(() => {
-    if (!parentType || !childTypes.length) {
-      setFields([]);
-      return;
-    }
+    if (!parentType || !childTypes.length) { setFields([]); return; }
     setFields(null);
     setFieldsError(null);
     getAvailableFields({ parentType, childTypes })
       .then((res) => {
         const list = res.fields || [];
         setFields(list);
-        if (list.length && !list.some((f) => f.name === fieldName)) {
-          setFieldName(list[0].name);
-        }
-        if (!list.length) setFieldName('');
+        if (!list.some((f) => f.name === fieldName)) setFieldName('');
       })
-      .catch((err) => {
-        setFieldsError(err.message);
-        setFields([]);
-      });
+      .catch((err) => { setFieldsError(err.message); setFields([]); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parentType, childTypes.join('|')]);
+  }, [parentType, childTypes.join('|'), fieldsRefreshKey]);
 
   const validChildren = hierarchy ? hierarchy[parentType] || [] : [];
-  const canContinue = !!fieldName.trim() && childTypes.length > 0;
+  const canContinue = !!name.trim() && !!fieldName.trim() && childTypes.length > 0;
 
-  const toggleChildType = (t) => {
-    setChildTypes((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
-    );
-  };
+  const toggleChildType = (t) =>
+    setChildTypes((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]);
 
   if (hierarchyError) {
     return (
-      <div className="rounded-lg bg-red-50 p-4 text-sm text-red-700">
+      <div className="rounded-lg border border-pb-err-bg bg-pb-err-bg/50 p-4 text-sm text-pb-err-text">
         Couldn't load hierarchy: {hierarchyError}
       </div>
     );
   }
   if (!hierarchy) {
-    return <div className="text-sm text-gray-500">Loading…</div>;
+    return <div className="text-[13.5px] text-pb-subtle">Loading…</div>;
   }
 
   return (
     <div>
-      <h2 className="mb-1 text-xl font-bold text-pb-dark">
-        {initialConfig ? 'Edit Script' : 'Configure Script'}
+      <h2 className="mb-1 font-sans font-semibold text-2xl tracking-tight text-pb-dark">
+        {initialConfig ? 'Edit script' : 'Configure script'}
       </h2>
-      <p className="mb-6 text-sm text-gray-500">
+      <p className="mb-6 text-[13.5px] text-pb-muted">
         Pick a parent entity type, the child types to sync into, and a field. The script copies the parent's value down to all matching descendants.
       </p>
 
-      <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Parent type</h3>
-        <select
-          value={parentType}
-          onChange={(e) => {
-            userChangedParent.current = true;
-            setParentType(e.target.value);
-          }}
-          className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
-        >
-          {Object.keys(hierarchy).map((t) => (
-            <option key={t} value={t}>{labelOf(t)}</option>
-          ))}
-        </select>
+      {/* Name */}
+      <div className="mb-5">
+        <label className={sectionHeadCls}>
+          Name <span className="font-normal text-pb-subtle">— shown in scripts list</span>
+        </label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="e.g. Sync Dev Lead to features"
+          className={inputCls}
+        />
       </div>
 
-      <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Child types</h3>
-        <div className="space-y-2 rounded-lg border border-gray-200 p-3">
+      {/* Parent type */}
+      <div className="mb-5">
+        <label className={sectionHeadCls}>
+          Parent type <span className="font-normal text-pb-subtle">— where the value lives</span>
+        </label>
+        <div className="relative">
+          <select
+            value={parentType}
+            onChange={(e) => {
+              userChangedParent.current = true;
+              setParentType(e.target.value);
+            }}
+            className={`${inputCls} appearance-none pr-9`}
+          >
+            {Object.keys(hierarchy).map((t) => (
+              <option key={t} value={t}>{labelOf(t)}</option>
+            ))}
+          </select>
+          <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-pb-subtle" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+        </div>
+      </div>
+
+      {/* Child types */}
+      <div className="mb-5">
+        <label className={sectionHeadCls}>
+          Child types <span className="font-normal text-pb-subtle">— where the value gets copied</span>
+        </label>
+        <div className="rounded-lg border border-pb-dark/[0.14] bg-white p-1">
           {validChildren.map((t) => (
-            <label key={t} className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={childTypes.includes(t)}
-                onChange={() => toggleChildType(t)}
-                className="h-4 w-4 rounded border-gray-300 text-pb-blue focus:ring-pb-blue"
-              />
-              <span className="text-sm text-gray-700">{labelOf(t)}</span>
+            <label
+              key={t}
+              className="flex cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-pb-cream/70"
+            >
+              <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] ${
+                childTypes.includes(t) ? 'bg-pb-dark text-pb-cream' : 'border-[1.5px] border-pb-dark/[0.22]'
+              }`}>
+                {childTypes.includes(t) && (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                )}
+              </span>
+              <span className="flex-1 text-[13.5px] text-pb-dark">{labelOf(t)}</span>
+              <input type="checkbox" checked={childTypes.includes(t)} onChange={() => toggleChildType(t)} className="sr-only" />
             </label>
           ))}
         </div>
-        <p className="mt-1 text-xs text-gray-500">
+        <p className="mt-1.5 text-[11.5px] text-pb-subtle">
           The script walks descendants recursively, so picking only top-level types still reaches deep ones via their parents.
         </p>
       </div>
 
-      <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Field</h3>
+      {/* Field */}
+      <div className="mb-5">
+        <label className={sectionHeadCls}>Field to copy</label>
         {fieldsError ? (
           <>
-            <input
-              type="text"
-              value={fieldName}
-              onChange={(e) => setFieldName(e.target.value)}
-              placeholder="e.g. Status"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
-            />
-            <p className="mt-1 text-xs text-amber-700">
+            <input type="text" value={fieldName} onChange={(e) => setFieldName(e.target.value)} placeholder="e.g. Status" className={inputCls} />
+            <p className="mt-1.5 text-[11.5px] text-pb-amber-text">
               Couldn't load field list ({fieldsError}). Type the name manually.
             </p>
           </>
         ) : fields === null ? (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500">
+          <div className="rounded-lg border border-pb-dark/[0.08] bg-pb-cream px-3 py-2.5 text-[12.5px] text-pb-subtle">
             Loading fields…
           </div>
         ) : fields.length === 0 ? (
-          <p className="text-xs text-gray-500">
+          <p className="text-[12.5px] text-pb-subtle">
             No common fields found across the selected types. Pick at least one child type whose schema overlaps with the parent.
           </p>
         ) : (
           <>
-            <select
-              value={fieldName}
-              onChange={(e) => setFieldName(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-pb-blue focus:outline-none focus:ring-1 focus:ring-pb-blue"
-            >
-              {fields.map((f) => (
-                <option key={f.key} value={f.name}>
-                  {f.name}{f.kind === 'custom' ? ' (custom)' : ''}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-gray-500">
-              Showing fields that exist on every selected type.
-            </p>
+            <div className="relative">
+              <select
+                value={fieldName}
+                onChange={(e) => setFieldName(e.target.value)}
+                className={`${inputCls} appearance-none pr-9`}
+              >
+                <option value="" disabled hidden>Choose a field…</option>
+                {groupFields(fields).map(({ type, fields: group }) => (
+                  <optgroup key={type} label={type}>
+                    {group.map((f) => (
+                      <option key={f.key} value={f.name}>{f.name}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-pb-subtle" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            {(() => {
+              const selected = fields.find((f) => f.name === fieldName);
+              if (selected?.missingFrom?.length) {
+                const missing = selected.missingFrom.map((t) => labelOf(t)).join(', ');
+                return (
+                  <div className="mt-2 rounded-lg border border-pb-amber/30 bg-pb-err-bg px-3 py-2.5">
+                    <p className="text-[12px] text-pb-err-text">
+                      This field isn't configured on <span className="font-medium">{missing}</span>, so those entities will be skipped. Add this field under Data → Custom fields in Productboard, then{' '}
+                      <button
+                        type="button"
+                        onClick={() => setFieldsRefreshKey((k) => k + 1)}
+                        className="font-medium underline hover:text-pb-dark"
+                      >
+                        refresh
+                      </button>
+                      {' '}to confirm.
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </>
         )}
       </div>
 
-      <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Schedule</h3>
+      {/* Schedule */}
+      <div className="mb-5">
+        <label className={sectionHeadCls}>Schedule</label>
         <SchedulePicker value={schedule} onChange={setSchedule} />
       </div>
 
-      <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-pb-dark">Options</h3>
-        <div className="space-y-3">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-pb-blue focus:ring-pb-blue"
-            />
-            <div>
-              <div className="text-sm font-medium text-gray-700">Dry run (preview only)</div>
-              <div className="text-xs text-gray-500">
-                Logs what would change without writing to Productboard. Recommended for first run.
+      {/* Options */}
+      <div className="mb-7">
+        <label className={sectionHeadCls}>Behaviour</label>
+        <div className="rounded-lg border border-pb-dark/[0.14] bg-white p-1">
+          {[
+            { key: 'dryRun', value: dryRun, set: setDryRun, label: 'Dry run (preview only)', desc: 'Logs what would change without writing to Productboard. Recommended for first run.' },
+            { key: 'overwrite', value: overwriteExisting, set: setOverwriteExisting, label: 'Overwrite existing values on children', desc: 'If off, children that already have a value are left alone.' },
+            { key: 'skipEmpty', value: skipIfEmpty, set: setSkipIfEmpty, label: "Skip when parent's field is empty", desc: 'Avoids clearing children when the parent has nothing to give.' },
+          ].map(({ key, value, set, label, desc }) => (
+            <label
+              key={key}
+              className="flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-pb-cream/70"
+            >
+              <span className={`mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] ${
+                value ? 'bg-pb-dark text-pb-cream' : 'border-[1.5px] border-pb-dark/[0.22]'
+              }`}>
+                {value && (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M20 6L9 17l-5-5"/></svg>
+                )}
+              </span>
+              <div className="flex-1">
+                <div className="text-[13.5px] text-pb-dark">{label}</div>
+                <div className="mt-0.5 text-[11.5px] text-pb-subtle">{desc}</div>
               </div>
-            </div>
-          </label>
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={overwriteExisting}
-              onChange={(e) => setOverwriteExisting(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-pb-blue focus:ring-pb-blue"
-            />
-            <span className="text-sm text-gray-700">Overwrite existing values on children</span>
-          </label>
-          <label className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              checked={skipIfEmpty}
-              onChange={(e) => setSkipIfEmpty(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-pb-blue focus:ring-pb-blue"
-            />
-            <span className="text-sm text-gray-700">Skip when parent's field is empty</span>
-          </label>
+              <input type="checkbox" checked={value} onChange={(e) => set(e.target.checked)} className="sr-only" />
+            </label>
+          ))}
         </div>
       </div>
 
@@ -288,18 +301,10 @@ function SyncFieldConfigure({ initialConfig, onContinue, submitLabel = 'Review &
         disabled={!canContinue}
         onClick={() =>
           onContinue({
-            config: {
-              parentType,
-              childTypes,
-              fieldName,
-              schedule,
-              dryRun,
-              overwriteExisting,
-              skipIfEmpty,
-            },
+            config: { name, parentType, childTypes, fieldName, schedule, dryRun, overwriteExisting, skipIfEmpty },
           })
         }
-        className="w-full rounded-lg bg-pb-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-pb-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
+        className="w-full rounded-lg bg-pb-dark px-4 py-2.5 text-sm font-medium text-pb-cream transition-colors hover:bg-pb-dark/90 disabled:cursor-not-allowed disabled:opacity-40"
       >
         {submitLabel}
       </button>

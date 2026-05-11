@@ -3,6 +3,7 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { storeToken } from '../services/secretManager.js';
+import { savePkceVerifier, popPkceVerifier } from '../services/firestore.js';
 import { capture, identify } from '../services/analytics.js';
 
 const router = Router();
@@ -10,10 +11,6 @@ const router = Router();
 const PB_AUTH_URL = 'https://app.productboard.com/oauth2/authorize';
 const PB_TOKEN_URL = 'https://app.productboard.com/oauth2/token';
 const SCOPES = 'entities:read entities:write entities:delete notes:read notes:write notes:delete analytics:read members:read members:pii:read users:pii:read teams:read teams:write teams:delete webhooks:read webhooks:write webhooks:delete plugin-integrations:read plugin-integrations:write plugin-integrations:delete jira-integrations:read';
-
-// In-memory store for PKCE code verifiers (keyed by state)
-// In production, use a session store or Redis
-const pkceStore = new Map();
 
 function generatePKCE() {
   // Generate a random code_verifier (43-128 chars, URL-safe)
@@ -24,14 +21,11 @@ function generatePKCE() {
 }
 
 // GET /auth/login — redirect to Productboard OAuth with PKCE
-router.get('/login', (req, res) => {
+router.get('/login', async (req, res) => {
   const { verifier, challenge } = generatePKCE();
   const state = crypto.randomBytes(16).toString('base64url');
 
-  // Store the verifier so we can use it in the callback
-  pkceStore.set(state, verifier);
-  // Clean up after 10 minutes
-  setTimeout(() => pkceStore.delete(state), 10 * 60 * 1000);
+  await savePkceVerifier(state, verifier);
 
   const params = new URLSearchParams({
     client_id: process.env.PB_CLIENT_ID,
@@ -53,9 +47,7 @@ router.get('/callback', async (req, res) => {
     return res.status(400).json({ message: 'Missing authorization code' });
   }
 
-  // Retrieve the PKCE code_verifier
-  const codeVerifier = pkceStore.get(state);
-  if (state) pkceStore.delete(state);
+  const codeVerifier = state ? await popPkceVerifier(state) : null;
 
   try {
     const params = {
@@ -74,7 +66,23 @@ router.get('/callback', async (req, res) => {
     const tokenRes = await axios.post(tokenUrl);
 
     const { access_token } = tokenRes.data;
-    const workspaceId = tokenRes.data.workspace_id || `ws-${Date.now()}`;
+
+    // Derive a stable workspace ID from the access token's JWT payload (sub claim).
+    // Falls back to workspace_id in the token response, then a timestamp (unstable).
+    let workspaceId = tokenRes.data.workspace_id;
+    if (!workspaceId) {
+      try {
+        const [, payload] = access_token.split('.');
+        if (payload) {
+          const decoded = JSON.parse(Buffer.from(payload, 'base64').toString('utf8'));
+          const stableId = decoded.sub || decoded.user_id || decoded.userId || decoded.uid;
+          if (stableId) workspaceId = `pb-${stableId}`;
+        }
+      } catch {
+        // opaque token — fall through to timestamp
+      }
+    }
+    workspaceId = workspaceId || `ws-${Date.now()}`;
 
     await storeToken(workspaceId, access_token);
 

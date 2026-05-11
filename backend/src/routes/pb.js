@@ -21,10 +21,6 @@ import { createPBClient } from '../services/pbClient.js';
 
 const router = Router();
 
-// Built-in fields that are meaningful to sync. Anything not in this list and
-// not a UUID gets filtered out.
-const BUILTIN_ALLOWLIST = new Set(['tags', 'health', 'timeframe', 'status', 'owner']);
-
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
 // Static hierarchy of valid parent → child relationships in the PB data model.
@@ -41,18 +37,43 @@ router.get('/hierarchy', requireAuth, (_req, res) => {
   res.json({ hierarchy: HIERARCHY });
 });
 
+// Cheap liveness check — verifies the stored PB token is still accepted.
+// Returns 401 if PB rejects it (e.g. OAuth app was removed by the user).
+// Returns { connected: true } for transient PB errors so we never log users
+// out during a PB outage.
+router.get('/status', requireAuth, async (req, res) => {
+  const workspaceId = req.workspace.workspaceId;
+  const token = await getToken(workspaceId);
+  if (!token) return res.status(401).json({ connected: false, reason: 'no_token' });
+
+  const pb = createPBClient(token);
+  try {
+    await pb.getEntityConfiguration('feature');
+    res.json({ connected: true });
+  } catch (err) {
+    const status = err.response?.status;
+    if (status === 401 || status === 403) {
+      return res.status(401).json({ connected: false, reason: 'token_revoked' });
+    }
+    // PB outage or network error — don't sign the user out
+    res.json({ connected: true, warning: 'Could not verify' });
+  }
+});
+
 function fieldsFromConfig(configResponse) {
   const fields = configResponse?.data?.fields || {};
   const out = [];
   for (const [key, def] of Object.entries(fields)) {
-    const isCustom = UUID_RE.test(key);
-    const isAllowedBuiltin = BUILTIN_ALLOWLIST.has(key);
-    if (!isCustom && !isAllowedBuiltin) continue;
+    if (!UUID_RE.test(key)) continue;
     out.push({
       key,
       name: def.name || key,
-      kind: isCustom ? 'custom' : 'builtin',
-      type: def.schema?.type || 'unknown',
+      schema: {
+        type: def.schema?.type,
+        format: def.schema?.format,
+        required: def.schema?.required,
+        constraints: def.schema?.constraints,
+      },
     });
   }
   return out;
@@ -97,17 +118,20 @@ router.get('/fields', requireAuth, async (req, res) => {
     });
   }
 
-  // Intersect across every type — only keep field NAMES that appear in all.
-  const perTypeFields = configs.map(fieldsFromConfig);
-  const nameSets = perTypeFields.map((arr) => new Set(arr.map((f) => f.name)));
-  const intersection = perTypeFields[0]
-    .filter((f) => nameSets.every((s) => s.has(f.name)))
-    .sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'builtin' ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
+  // Show all custom fields from the parent type. For each field, also report
+  // which child types don't have it configured so the UI can warn the user.
+  const parentFields = fieldsFromConfig(configs[0]);
+  const childTypeList = types.slice(1);
+  const childFieldNameSets = configs.slice(1).map((c) => new Set(fieldsFromConfig(c).map((f) => f.name)));
 
-  res.json({ fields: intersection, types });
+  const fields = parentFields
+    .map((f) => ({
+      ...f,
+      missingFrom: childTypeList.filter((_, i) => !childFieldNameSets[i].has(f.name)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  res.json({ fields, types });
 });
 
 export default router;

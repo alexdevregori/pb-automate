@@ -1,9 +1,10 @@
 export default function StatusDot({ status, className = '' }) {
   const color = {
-    ok: 'bg-emerald-500',
-    fail: 'bg-red-500',
-    paused: 'bg-gray-400',
-    manual: 'bg-gray-400',
-  }[status] || 'bg-gray-400';
+    ok:      'bg-pb-green',
+    partial: 'bg-pb-amber',
+    fail:    'bg-pb-err',
+    paused:  'bg-pb-subtle',
+    manual:  'bg-pb-subtle',
+  }[status] || 'bg-pb-subtle';
   return <span className={`inline-block h-1.5 w-1.5 rounded-full ${color} ${className}`} />;
 }

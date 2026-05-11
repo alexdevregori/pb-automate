@@ -1,27 +1,24 @@
-import React from 'react';
-
 const schedules = [
-  { id: 'on-change', label: 'On Change', desc: 'Triggered by webhooks' },
-  { id: 'hourly', label: 'Hourly', desc: 'Every hour' },
-  { id: 'daily', label: 'Daily', desc: 'Once per day at midnight UTC' },
   { id: 'manual', label: 'Manual', desc: 'Run on demand only' },
+  { id: 'daily',  label: 'Daily',  desc: 'Once per day at midnight UTC' },
 ];
 
 export default function SchedulePicker({ value, onChange }) {
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-2 gap-2">
       {schedules.map((s) => (
         <button
           key={s.id}
+          type="button"
           onClick={() => onChange(s.id)}
-          className={`rounded-lg border-2 p-3 text-left transition-all ${
+          className={`rounded-xl border p-4 text-left transition-all ${
             value === s.id
-              ? 'border-pb-blue bg-pb-blue/5'
-              : 'border-gray-200 hover:border-gray-300'
+              ? 'border-[1.5px] border-pb-dark bg-pb-cream'
+              : 'border border-pb-dark/[0.12] bg-white hover:border-pb-dark/[0.25]'
           }`}
         >
-          <div className="text-sm font-medium text-pb-dark">{s.label}</div>
-          <div className="text-xs text-gray-500">{s.desc}</div>
+          <div className="mb-1 text-[13.5px] font-medium text-pb-dark">{s.label}</div>
+          <div className="text-[11.5px] text-pb-subtle">{s.desc}</div>
         </button>
       ))}
     </div>

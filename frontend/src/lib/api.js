@@ -1,18 +1,24 @@
+import { getSessionId } from './events.js';
+
 const API_BASE = '/api';
 
 async function request(path, options = {}) {
   const token = localStorage.getItem('pb_token');
+  const sessionId = getSessionId();
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(sessionId ? { 'X-PH-SESSION-ID': sessionId } : {}),
       ...options.headers,
     },
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(err.message || 'Request failed');
+    const body = await res.json().catch(() => ({ message: res.statusText }));
+    const err = new Error(body.message || 'Request failed');
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -68,4 +74,8 @@ export function getAvailableFields({ parentType, childTypes } = {}) {
 
 export function getHierarchy() {
   return request('/pb/hierarchy');
+}
+
+export function checkPBStatus() {
+  return request('/pb/status');
 }

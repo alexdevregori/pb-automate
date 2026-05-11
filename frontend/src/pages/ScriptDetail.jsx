@@ -3,11 +3,26 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { Play, MoreHorizontal, Edit3, Pause, RotateCcw, Trash2, Copy, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { getScript, runScript, pauseScript, deleteScript } from '../lib/api';
-import StatusDot from '../components/StatusDot';
 import StatusBadge from '../components/StatusBadge';
 import RunRow from '../components/RunRow';
 import LogPane from '../components/LogPane';
 import { relativeTime } from '../lib/relativeTime';
+
+const TYPE_LABELS = {
+  product: 'product', component: 'component', feature: 'feature',
+  subfeature: 'sub-feature', release: 'release', initiative: 'initiative',
+  objective: 'objective', keyResult: 'key result',
+};
+
+function TreeNode({ label, isParent = false }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11.5px] font-medium ${
+      isParent ? 'bg-pb-err-bg text-pb-err-text' : 'bg-pb-warm text-pb-muted'
+    }`}>
+      {label}
+    </span>
+  );
+}
 
 export default function ScriptDetail() {
   const { id } = useParams();
@@ -29,16 +44,10 @@ export default function ScriptDetail() {
       })
       .catch((e) => setError(e.message));
 
-  useEffect(() => {
-    load();
-  }, [id]);
+  useEffect(() => { load(); }, [id]);
 
-  // Reset "Copied" indicator when the selected run changes.
-  useEffect(() => {
-    setCopied(false);
-  }, [selectedId]);
+  useEffect(() => { setCopied(false); }, [selectedId]);
 
-  // Close kebab menu on outside click.
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (e) => {
@@ -48,12 +57,12 @@ export default function ScriptDetail() {
     return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
-  if (error) return <div className="text-sm text-red-600">{error}</div>;
-  if (!data) return <div className="text-sm text-gray-500">Loading…</div>;
+  if (error) return <div className="text-sm text-pb-err-text">{error}</div>;
+  if (!data) return <div className="text-sm text-pb-subtle">Loading…</div>;
 
   const { deployment, runs } = data;
   const selected = runs.find((r) => r.runId === selectedId) || runs[0];
-  const status = !selected ? 'manual' : selected.status;
+  const cfg = deployment.config || {};
 
   const handleRun = async () => {
     setRunning(true);
@@ -72,7 +81,7 @@ export default function ScriptDetail() {
     setMenuOpen(false);
     setBusy(true);
     try {
-      const next = !data.deployment.paused;
+      const next = !deployment.paused;
       await pauseScript(id, next);
       toast.success(next ? 'Paused' : 'Resumed');
       await load();
@@ -85,9 +94,7 @@ export default function ScriptDetail() {
 
   const handleDelete = async () => {
     setMenuOpen(false);
-    if (!window.confirm(`Delete this ${data.deployment.scriptId} deployment? This cannot be undone.`)) {
-      return;
-    }
+    if (!window.confirm(`Delete "${deployment.name || deployment.scriptId}"? This cannot be undone.`)) return;
     setBusy(true);
     try {
       await deleteScript(id);
@@ -101,72 +108,103 @@ export default function ScriptDetail() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="mb-2 text-xs text-gray-500">
+      {/* Breadcrumb */}
+      <div className="mb-3 text-[12.5px] text-pb-subtle">
         <Link to="/dashboard" className="hover:text-pb-dark">Scripts</Link>
-        <span className="px-1">›</span>
-        <span>{deployment.scriptId}</span>
+        <span className="px-1.5">›</span>
+        <span className="font-medium text-pb-dark">{deployment.name || deployment.scriptId}</span>
       </div>
 
-      <div className="mb-4 flex items-start justify-between">
+      {/* Header */}
+      <div className="mb-5 flex items-start justify-between">
         <div>
-          <div className="mb-0.5 flex items-center gap-2">
-            <StatusDot status={status} />
-            <h1 className="text-base font-bold text-pb-dark">{deployment.scriptId}</h1>
-            <StatusBadge status={status} />
-          </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+          <div className="mb-2 flex items-center gap-3">
+            <span className={`h-2 w-2 rounded-full ${
+              deployment.paused ? 'bg-pb-subtle' :
+              !selected          ? 'bg-pb-subtle' :
+              selected.status === 'fail'    ? 'bg-pb-err' :
+              selected.status === 'partial' ? 'bg-pb-amber' :
+                                              'bg-pb-green'
+            }`} />
+            <h1 className="font-sans font-semibold text-[28px] tracking-tight text-pb-dark">
+              {deployment.name || deployment.scriptId}
+            </h1>
             {deployment.scriptId === 'syncField' && (
-              <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                  deployment.config?.dryRun
-                    ? 'bg-amber-50 text-amber-700'
-                    : 'bg-emerald-50 text-emerald-700'
-                }`}
-              >
+              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                deployment.config?.dryRun
+                  ? 'bg-pb-warm text-pb-muted'
+                  : 'bg-pb-err-bg text-pb-err-text'
+              }`}>
                 {deployment.config?.dryRun ? 'DRY RUN' : 'LIVE'}
               </span>
             )}
-            <span>{deployment.schedule}</span>
-            {selected && <span>· last ran {relativeTime(selected.startedAt)}</span>}
+            <StatusBadge status={deployment.paused ? 'paused' : selected?.status || 'manual'} errorCount={selected?.errorCount} />
+          </div>
+
+          {/* Tree + meta row */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {cfg.parentType && (
+              <TreeNode label={TYPE_LABELS[cfg.parentType] || cfg.parentType} isParent />
+            )}
+            {(cfg.childTypes || []).length > 0 && (
+              <>
+                <span className="text-[11px] text-pb-subtle">→</span>
+                {cfg.childTypes.map((t) => (
+                  <TreeNode key={t} label={TYPE_LABELS[t] || t} />
+                ))}
+              </>
+            )}
+            {cfg.fieldName && (
+              <span className="ml-1 text-[12px] text-pb-subtle">
+                · field{' '}
+                <code className="rounded bg-pb-warm px-1.5 py-0.5 text-[11.5px] text-pb-dark">
+                  {cfg.fieldName}
+                </code>
+              </span>
+            )}
+            <span className="ml-1 text-[12px] text-pb-subtle">· {deployment.schedule}</span>
+            {selected && <span className="text-[12px] text-pb-subtle">· last ran {relativeTime(selected.startedAt)}</span>}
           </div>
         </div>
-        <div className="flex gap-1.5">
+
+        {/* Actions */}
+        <div className="flex items-center gap-2">
           <button
             onClick={handleRun}
             disabled={running}
-            className="inline-flex items-center gap-1 rounded-md bg-pb-blue px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-pb-blue/90 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-pb-dark px-3 py-2 text-[12.5px] font-medium text-pb-cream hover:bg-pb-dark/90 disabled:opacity-50"
           >
-            <Play size={12} /> {running ? 'Running…' : 'Run'}
+            <Play size={13} /> {running ? 'Running…' : 'Run now'}
           </button>
           <button
             onClick={() => navigate(`/scripts/${id}/edit`)}
-            className="inline-flex items-center gap-1 rounded-md border border-pb-blue/30 bg-pb-blue/5 px-2.5 py-1.5 text-xs font-semibold text-pb-blue transition-colors hover:bg-pb-blue/10"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-pb-dark/[0.14] px-3 py-2 text-[12.5px] font-medium text-pb-dark hover:bg-pb-cream"
           >
-            <Edit3 size={12} /> Edit
+            <Edit3 size={13} /> Edit
           </button>
           <div className="relative" ref={menuRef}>
             <button
               onClick={() => setMenuOpen((o) => !o)}
               disabled={busy}
               aria-label="More actions"
-              className="rounded-md border border-gray-200 px-2 py-1.5 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+              className="rounded-lg border border-pb-dark/[0.14] px-2 py-2 text-pb-muted hover:bg-pb-cream disabled:opacity-50"
             >
-              <MoreHorizontal size={12} />
+              <MoreHorizontal size={14} />
             </button>
             {menuOpen && (
-              <div className="absolute right-0 top-full z-10 mt-1 w-36 overflow-hidden rounded-md border border-gray-200 bg-white text-xs font-semibold shadow-md">
+              <div className="absolute right-0 top-full z-10 mt-1 w-36 overflow-hidden rounded-xl border border-pb-dark/[0.08] bg-white text-[12.5px] font-medium shadow-md">
                 <button
                   onClick={handlePauseToggle}
-                  className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left text-gray-700 hover:bg-gray-50"
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-pb-muted hover:bg-pb-cream"
                 >
-                  {deployment.paused ? <RotateCcw size={12} /> : <Pause size={12} />}
+                  {deployment.paused ? <RotateCcw size={13} /> : <Pause size={13} />}
                   {deployment.paused ? 'Resume' : 'Pause'}
                 </button>
                 <button
                   onClick={handleDelete}
-                  className="flex w-full items-center gap-1.5 border-t border-gray-100 px-2.5 py-1.5 text-left text-red-600 hover:bg-red-50"
+                  className="flex w-full items-center gap-2 border-t border-pb-dark/[0.06] px-3 py-2.5 text-left text-pb-err-text hover:bg-pb-err-bg"
                 >
-                  <Trash2 size={12} /> Delete
+                  <Trash2 size={13} /> Delete
                 </button>
               </div>
             )}
@@ -174,37 +212,46 @@ export default function ScriptDetail() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-3">
-        <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-          <div className="border-b border-gray-100 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-            Runs ({runs.length})
+      {/* Content grid */}
+      <div className="grid min-h-0 flex-1 grid-cols-[300px_1fr] gap-4">
+        {/* Run list */}
+        <div className="overflow-hidden rounded-2xl border border-pb-dark/[0.08] bg-white">
+          <div className="border-b border-pb-dark/[0.06] px-4 py-3 text-[10px] font-medium uppercase tracking-widest text-pb-subtle">
+            Recent runs ({runs.length})
           </div>
           <div className="overflow-auto" style={{ maxHeight: 'calc(100% - 40px)' }}>
             {runs.length === 0 ? (
-              <div className="p-3 text-xs text-gray-500">No runs yet.</div>
+              <div className="p-4 text-[13px] text-pb-subtle">No runs yet.</div>
             ) : (
-              runs.map((r) => (
-                <RunRow
-                  key={r.runId}
-                  run={r}
-                  selected={r.runId === selectedId}
-                  onClick={() => setSelectedId(r.runId)}
-                />
-              ))
+              <div className="p-1.5">
+                {runs.map((r) => (
+                  <RunRow
+                    key={r.runId}
+                    run={r}
+                    selected={r.runId === selectedId}
+                    onClick={() => setSelectedId(r.runId)}
+                  />
+                ))}
+              </div>
             )}
           </div>
         </div>
 
-        <div className="flex flex-col rounded-2xl bg-white p-3 shadow-sm">
+        {/* Log panel */}
+        <div className="flex flex-col overflow-hidden rounded-2xl border border-pb-dark/[0.08] bg-white p-4">
           {selected ? (
             <>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <StatusDot status={selected.status} />
-                  <span className="text-sm font-semibold text-pb-dark">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] font-medium uppercase tracking-widest text-pb-subtle">
                     Run · {relativeTime(selected.startedAt)}
-                  </span>
-                  <StatusBadge status={selected.status} />
+                  </div>
+                  <div className="mt-0.5 font-sans font-semibold text-[17px] tracking-tight text-pb-dark">
+                    {selected.status === 'ok'      ? 'Completed successfully' :
+                     selected.status === 'partial' ? `Completed with ${selected.errorCount || 'some'} error${selected.errorCount === 1 ? '' : 's'}` :
+                     selected.status === 'fail'    ? 'Run failed' :
+                                                     selected.summary}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -217,12 +264,12 @@ export default function ScriptDetail() {
                         toast.error('Copy failed');
                       }
                     }}
-                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
+                    className="inline-flex items-center gap-1 rounded-lg border border-pb-dark/[0.14] px-2.5 py-1.5 text-[11px] font-medium text-pb-muted hover:bg-pb-cream"
                   >
-                    {copied ? <Check size={10} /> : <Copy size={10} />}
+                    {copied ? <Check size={11} /> : <Copy size={11} />}
                     {copied ? 'Copied' : 'Copy logs'}
                   </button>
-                  <span className="text-[10px] text-gray-500">
+                  <span className="text-[11.5px] text-pb-subtle">
                     {(selected.durationMs / 1000).toFixed(1)}s
                   </span>
                 </div>
@@ -232,7 +279,7 @@ export default function ScriptDetail() {
               </div>
             </>
           ) : (
-            <div className="text-sm text-gray-500">
+            <div className="text-[13.5px] text-pb-subtle">
               Nothing to read yet — click Run to trigger one.
             </div>
           )}

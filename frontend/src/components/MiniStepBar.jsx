@@ -4,26 +4,28 @@ const steps = ['Configure', 'Deploy', 'Done'];
 
 export default function MiniStepBar({ current }) {
   return (
-    <div className="mb-6 flex items-center justify-center gap-2">
+    <div className="mb-8 flex items-center justify-center gap-3">
       {steps.map((label, i) => {
         const n = i + 1;
         const active = n === current;
         const done = n < current;
         return (
-          <div key={label} className="flex items-center gap-1.5">
-            {i > 0 && <div className={`h-px w-8 ${done ? 'bg-pb-blue' : 'bg-gray-300'}`} />}
+          <div key={label} className="flex items-center gap-2.5">
+            {i > 0 && (
+              <div className={`h-px w-10 ${done ? 'bg-pb-dark/30' : 'bg-pb-dark/[0.12]'}`} />
+            )}
             <div
-              className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
+              className={`flex h-7 w-7 items-center justify-center rounded-full text-[12px] font-medium ${
                 active
-                  ? 'bg-pb-blue text-white'
+                  ? 'border border-pb-err-text bg-pb-err-bg text-pb-err-text'
                   : done
-                    ? 'bg-pb-blue/20 text-pb-blue'
-                    : 'bg-gray-200 text-gray-500'
+                    ? 'bg-pb-dark text-pb-cream'
+                    : 'bg-pb-warm text-pb-subtle'
               }`}
             >
-              {done ? <Check size={12} /> : n}
+              {done ? <Check size={13} /> : n}
             </div>
-            <span className={`text-xs font-medium ${active ? 'text-pb-dark' : 'text-gray-400'}`}>
+            <span className={`text-[13px] font-medium ${active ? 'text-pb-dark' : done ? 'text-pb-muted' : 'text-pb-subtle'}`}>
               {label}
             </span>
           </div>

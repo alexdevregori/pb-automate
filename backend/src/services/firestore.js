@@ -110,6 +110,38 @@ export async function saveRunLog(workspaceId, run) {
   return doc;
 }
 
+export async function savePkceVerifier(state, verifier) {
+  const firestore = getDB();
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+  if (!firestore) {
+    mockStore[`pkce/${state}`] = { verifier, expiresAt };
+    return;
+  }
+  await firestore
+    .collection(COLLECTION).doc('pkce')
+    .collection('verifiers').doc(state)
+    .set({ verifier, expiresAt });
+}
+
+export async function popPkceVerifier(state) {
+  const firestore = getDB();
+  if (!firestore) {
+    const entry = mockStore[`pkce/${state}`];
+    delete mockStore[`pkce/${state}`];
+    if (!entry || entry.expiresAt < Date.now()) return null;
+    return entry.verifier;
+  }
+  const ref = firestore
+    .collection(COLLECTION).doc('pkce')
+    .collection('verifiers').doc(state);
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  await ref.delete();
+  const { verifier, expiresAt } = snap.data();
+  if (expiresAt < Date.now()) return null;
+  return verifier;
+}
+
 export async function getRunLogs(workspaceId, deploymentId) {
   const firestore = getDB();
   if (!firestore) {

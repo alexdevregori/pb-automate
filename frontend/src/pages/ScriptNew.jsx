@@ -6,14 +6,13 @@ import Configure from './Configure';
 import Deploy from './Deploy';
 
 const SCRIPTS = [
-  { id: 'countFeatures', label: 'Count Features (Smoke Test)' },
   { id: 'syncField', label: 'Sync Custom Field' },
 ];
 
 export default function ScriptNew() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [scriptId, setScriptId] = useState('countFeatures');
+  const [scriptId, setScriptId] = useState('syncField');
   const [config, setConfig] = useState(null);
 
   return (
@@ -21,25 +20,27 @@ export default function ScriptNew() {
       <MiniStepBar current={step} />
 
       {step === 1 && (
-        <div className="rounded-2xl bg-white p-6 shadow-sm">
-          <div className="mb-4">
-            <label className="mb-1 block text-xs font-medium text-gray-500">Script</label>
-            <div className="flex gap-2">
-              {SCRIPTS.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setScriptId(s.id)}
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-                    scriptId === s.id
-                      ? 'border-pb-blue bg-indigo-50 text-pb-blue'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {s.label}
-                </button>
-              ))}
+        <div className="rounded-2xl border border-pb-dark/[0.08] bg-white p-8 shadow-sm">
+          {SCRIPTS.length > 1 && (
+            <div className="mb-5">
+              <label className="mb-2 block text-[12.5px] font-medium text-pb-dark">Script type</label>
+              <div className="flex gap-2">
+                {SCRIPTS.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setScriptId(s.id)}
+                    className={`rounded-lg border px-3 py-1.5 text-[12.5px] font-medium transition-colors ${
+                      scriptId === s.id
+                        ? 'border-pb-dark bg-pb-dark text-pb-cream'
+                        : 'border-pb-dark/[0.14] text-pb-muted hover:bg-pb-cream'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
           <Configure
             scriptId={scriptId}
             onContinue={(c) => {
@@ -51,7 +52,7 @@ export default function ScriptNew() {
       )}
 
       {step === 2 && config && (
-        <div className="rounded-2xl bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-pb-dark/[0.08] bg-white p-8 shadow-sm">
           <Deploy
             scriptId={scriptId}
             config={config}
@@ -60,6 +61,12 @@ export default function ScriptNew() {
               navigate(`/scripts/${result.deployment.id}`);
             }}
           />
+          <button
+            onClick={() => setStep(1)}
+            className="mt-3 w-full rounded-lg border border-pb-dark/[0.14] px-4 py-2.5 text-sm font-medium text-pb-muted transition-colors hover:bg-pb-cream"
+          >
+            Back
+          </button>
         </div>
       )}
     </div>

@@ -3,10 +3,25 @@ import { useNavigate } from 'react-router-dom';
 import { Play, MoreHorizontal, Pause, Trash2, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { runScript, pauseScript, deleteScript } from '../lib/api';
-import StatusDot from './StatusDot';
 import StatusBadge from './StatusBadge';
 import Sparkline from './Sparkline';
 import { relativeTime } from '../lib/relativeTime';
+
+const TYPE_LABELS = {
+  product: 'product', component: 'component', feature: 'feature',
+  subfeature: 'sub-feature', release: 'release', initiative: 'initiative',
+  objective: 'objective', keyResult: 'key result',
+};
+
+function TreeNode({ label, isParent = false }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11.5px] font-medium ${
+      isParent ? 'bg-pb-err-bg text-pb-err-text' : 'bg-pb-warm text-pb-muted'
+    }`}>
+      {label}
+    </span>
+  );
+}
 
 export default function ScriptRow({ deployment, onChanged }) {
   const navigate = useNavigate();
@@ -14,7 +29,6 @@ export default function ScriptRow({ deployment, onChanged }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
-  // Close menu when clicking outside
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (e) => {
@@ -26,23 +40,7 @@ export default function ScriptRow({ deployment, onChanged }) {
 
   const latestRun = deployment.latestRun;
   const recentRuns = deployment.recentRuns || [];
-
-  const status = deployment.paused
-    ? 'paused'
-    : !latestRun
-      ? 'manual'
-      : latestRun.status;
-
-  const scheduleLabel =
-    deployment.schedule === 'manual' ? 'Manual trigger' :
-    deployment.schedule === 'on-change' ? 'On webhook event' :
-    `${deployment.schedule}`;
-
-  const lastRunLine = !latestRun
-    ? 'Never run'
-    : latestRun.status === 'fail'
-      ? `${relativeTime(latestRun.startedAt)} · ${latestRun.error || latestRun.summary}`
-      : `${relativeTime(latestRun.startedAt)} · ${latestRun.summary}`;
+  const cfg = deployment.config || {};
 
   const stop = (e) => e.stopPropagation();
 
@@ -51,11 +49,8 @@ export default function ScriptRow({ deployment, onChanged }) {
     setBusy(true);
     try {
       const result = await runScript(deployment.id);
-      if (result?.run?.status === 'fail') {
-        toast.error(`Run failed: ${result.run.summary}`);
-      } else {
-        toast.success(`${deployment.scriptId} ran successfully`);
-      }
+      if (result?.run?.status === 'fail') toast.error(`Run failed: ${result.run.summary}`);
+      else toast.success('Run complete');
       onChanged?.();
     } catch (err) {
       toast.error(err.message);
@@ -83,9 +78,7 @@ export default function ScriptRow({ deployment, onChanged }) {
   const handleDelete = async (e) => {
     stop(e);
     setMenuOpen(false);
-    if (!window.confirm(`Delete this ${deployment.scriptId} deployment? This cannot be undone.`)) {
-      return;
-    }
+    if (!window.confirm(`Delete "${deployment.name || deployment.scriptId}"? This cannot be undone.`)) return;
     setBusy(true);
     try {
       await deleteScript(deployment.id);
@@ -98,78 +91,106 @@ export default function ScriptRow({ deployment, onChanged }) {
     }
   };
 
+  const lastRunLine = !latestRun
+    ? 'Never run'
+    : `Last run ${relativeTime(latestRun.startedAt)} · ${latestRun.summary}`;
+
+  const scheduleLabel =
+    deployment.schedule === 'manual' ? 'Manual trigger' :
+    deployment.schedule === 'daily'  ? 'Daily sync' :
+    deployment.schedule || 'Manual trigger';
+
   return (
     <div
       onClick={() => navigate(`/scripts/${deployment.id}`)}
-      className="cursor-pointer border-b border-gray-100 p-4 last:border-b-0 hover:bg-gray-50"
+      className="cursor-pointer border-b border-pb-dark/[0.06] p-5 last:border-b-0 hover:bg-pb-cream/50"
     >
-      <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <StatusDot status={status} />
-          <span className="text-sm font-semibold text-pb-dark">{deployment.scriptId}</span>
-          <StatusBadge status={status} />
+      {/* Name + badge row */}
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className={`h-2 w-2 rounded-full ${
+            deployment.paused ? 'bg-pb-subtle' :
+            !latestRun        ? 'bg-pb-subtle' :
+            latestRun.status === 'fail'    ? 'bg-pb-err' :
+            latestRun.status === 'partial' ? 'bg-pb-amber' :
+                                             'bg-pb-green'
+          }`} />
+          <span className="font-sans font-semibold text-[17px] tracking-tight text-pb-dark">
+            {deployment.name || deployment.scriptId}
+          </span>
+          <StatusBadge
+            status={deployment.paused ? 'paused' : latestRun?.status || 'manual'}
+            errorCount={latestRun?.errorCount}
+          />
         </div>
-        <div className="relative flex gap-1.5" onClick={stop} ref={menuRef}>
+        <div className="relative flex items-center gap-1.5" onClick={stop} ref={menuRef}>
           <button
             onClick={handleRun}
             disabled={busy}
-            className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-pb-dark px-3 py-1.5 text-xs font-medium text-pb-cream transition-colors hover:bg-pb-dark/90 disabled:opacity-50"
           >
             <Play size={12} /> Run
           </button>
-
           <button
             onClick={(e) => { stop(e); setMenuOpen((o) => !o); }}
             disabled={busy}
-            className="rounded-md border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-50"
+            className="rounded-lg border border-pb-dark/[0.14] px-2 py-1.5 text-pb-muted hover:bg-pb-cream disabled:opacity-50"
             aria-label="More actions"
           >
-            <MoreHorizontal size={12} />
+            <MoreHorizontal size={14} />
           </button>
-
           {menuOpen && (
-            <div className="absolute right-0 top-full z-10 mt-1 w-40 overflow-hidden rounded-md border border-gray-200 bg-white text-xs shadow-md">
+            <div className="absolute right-0 top-full z-10 mt-1 w-36 overflow-hidden rounded-xl border border-pb-dark/[0.08] bg-white text-[12.5px] font-medium shadow-md">
               <button
                 onClick={handlePauseToggle}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-gray-700 hover:bg-gray-50"
+                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-pb-muted hover:bg-pb-cream"
               >
-                {deployment.paused ? <RotateCcw size={12} /> : <Pause size={12} />}
+                {deployment.paused ? <RotateCcw size={13} /> : <Pause size={13} />}
                 {deployment.paused ? 'Resume' : 'Pause'}
               </button>
               <button
                 onClick={handleDelete}
-                className="flex w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left text-red-600 hover:bg-red-50"
+                className="flex w-full items-center gap-2 border-t border-pb-dark/[0.06] px-3 py-2.5 text-left text-pb-err-text hover:bg-pb-err-bg"
               >
-                <Trash2 size={12} /> Delete
+                <Trash2 size={13} /> Delete
               </button>
             </div>
           )}
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <Field label="Schedule" value={scheduleLabel} />
-        <Field
-          label="Last run"
-          value={lastRunLine}
-          valueClass={latestRun?.status === 'fail' ? 'text-red-700' : ''}
-        />
-        <div>
-          <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-            Last 7 runs
-          </div>
+      {/* Tree nodes row */}
+      {cfg.parentType && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          <TreeNode label={TYPE_LABELS[cfg.parentType] || cfg.parentType} isParent />
+          {(cfg.childTypes || []).length > 0 && (
+            <>
+              <span className="text-[11px] text-pb-subtle">→</span>
+              {cfg.childTypes.map((t) => (
+                <TreeNode key={t} label={TYPE_LABELS[t] || t} />
+              ))}
+            </>
+          )}
+          {cfg.fieldName && (
+            <span className="ml-1.5 text-[11.5px] text-pb-subtle">
+              · field{' '}
+              <code className="rounded bg-pb-warm px-1.5 py-0.5 text-[11px] text-pb-dark">
+                {cfg.fieldName}
+              </code>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Stats row */}
+      <div className="flex items-center gap-5 text-[12.5px] text-pb-muted">
+        <span>{scheduleLabel}</span>
+        <span className={latestRun?.status === 'fail' ? 'text-pb-err-text' : ''}>{lastRunLine}</span>
+        <div className="ml-auto flex flex-col items-end gap-1">
+          <div className="text-[10px] font-medium uppercase tracking-widest text-pb-subtle">Last 7 runs</div>
           <Sparkline runs={recentRuns} />
         </div>
       </div>
-    </div>
-  );
-}
-
-function Field({ label, value, valueClass = '' }) {
-  return (
-    <div>
-      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
-      <div className={`text-xs font-medium text-pb-dark ${valueClass}`}>{value}</div>
     </div>
   );
 }
