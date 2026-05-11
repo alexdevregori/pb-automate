@@ -4,7 +4,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["src/index.js"],
+      "runtimeArgs": ["--watch", "src/index.js"],
       "port": 3000,
       "autoPort": false,
       "cwd": "backend",
