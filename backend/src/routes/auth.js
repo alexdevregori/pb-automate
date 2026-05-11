@@ -3,6 +3,7 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { storeToken } from '../services/secretManager.js';
+import { capture, identify } from '../services/analytics.js';
 
 const router = Router();
 
@@ -76,6 +77,9 @@ router.get('/callback', async (req, res) => {
     const workspaceId = tokenRes.data.workspace_id || `ws-${Date.now()}`;
 
     await storeToken(workspaceId, access_token);
+
+    identify(workspaceId, { authMethod: 'oauth' });
+    capture('login_succeeded', workspaceId, { authMethod: 'oauth' });
 
     const sessionToken = jwt.sign(
       { workspaceId },
@@ -152,6 +156,10 @@ router.post('/token', async (req, res) => {
     process.env.JWT_SECRET || 'dev-secret',
     { expiresIn: '24h' }
   );
+
+  identify(workspaceId, { authMethod: 'api_token' });
+  capture('login_succeeded', workspaceId, { authMethod: 'api_token' });
+
   res.json({ token: sessionToken, workspaceId });
 });
 

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { setToken } from '../lib/auth';
+import { capture, identify } from '../lib/analytics';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -25,6 +26,10 @@ export default function Login() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || 'Failed to authenticate');
       setToken(data.token);
+      if (data.workspaceId) {
+        identify(data.workspaceId, { authMethod: 'api_token' });
+        capture('login_succeeded', { authMethod: 'api_token' });
+      }
       navigate('/dashboard');
     } catch (err) {
       setError(err.message);

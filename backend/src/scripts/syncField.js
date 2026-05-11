@@ -66,21 +66,52 @@ export async function runSyncField(pbClient, config, _workspaceId) {
     return { logs, summary: 'No entities found' };
   }
 
-  // 3. Diagnostic dump: first entity's shape, truncated. Helps verify the
-  //    fields/relationships layout is what we expect.
+  // 3. Diagnostic dump: type breakdown + first entity shape.
+  const typeCounts = {};
+  for (const e of all) typeCounts[e.type ?? '(none)'] = (typeCounts[e.type ?? '(none)'] || 0) + 1;
+  log(`[diag] type breakdown: ${JSON.stringify(typeCounts)}`);
   const sample = JSON.stringify(all[0]).slice(0, 400);
   log(`[diag] first entity shape: ${sample}${sample.length >= 400 ? '…' : ''}`);
+  const firstComponent = all.find((e) => e.type === 'component');
+  if (firstComponent) {
+    log(`[diag] first component relationships: ${JSON.stringify(firstComponent.relationships)}`);
+  }
 
-  // 4. Build maps. Parent relationship is in entity.relationships array.
+  // 4. Build maps. Parent relationship is in entity.relationships.data (paginated).
+  //    Inline relationships only include the first page — for entities where the
+  //    parent rel isn't inline we fall back to fetching /entities/{id}/relationships.
   const byId = new Map(all.map((e) => [e.id, e]));
-  const parentIdOf = (e) => {
-    const rels = Array.isArray(e.relationships) ? e.relationships : [];
+  const parentIdOfInline = (e) => {
+    const rels = Array.isArray(e.relationships?.data) ? e.relationships.data : [];
     const parentRel = rels.find((r) => r.type === 'parent');
     return parentRel?.target?.id || null;
   };
+
+  // First pass: inline relationships.
+  const parentIdCache = new Map(); // entityId → parentId
+  const needsFallback = [];
+  for (const e of all) {
+    const pid = parentIdOfInline(e);
+    if (pid) {
+      parentIdCache.set(e.id, pid);
+    } else if (e.type !== parentType) {
+      // Non-root entities that have no inline parent may need a fallback fetch.
+      needsFallback.push(e);
+    }
+  }
+
+  // Second pass: fetch relationships individually for entities without an inline parent.
+  if (needsFallback.length) {
+    log(`[diag] fetching relationships for ${needsFallback.length} entities with no inline parent…`);
+    await Promise.all(needsFallback.map(async (e) => {
+      const pid = await pbClient.fetchParentId(e.id);
+      if (pid) parentIdCache.set(e.id, pid);
+    }));
+  }
+
   const childrenOf = new Map(); // parentId → child entities
   for (const e of all) {
-    const pid = parentIdOf(e);
+    const pid = parentIdCache.get(e.id);
     if (!pid) continue;
     const list = childrenOf.get(pid) || [];
     list.push(e);
@@ -119,8 +150,11 @@ export async function runSyncField(pbClient, config, _workspaceId) {
       continue;
     }
 
+    const directChildren = childrenOf.get(parent.id) || [];
+    log(`[PROCESS] ${parentType} "${parentName}": value=${fmt(sourceValue)}, ${directChildren.length} direct child(ren)`);
+
     // BFS, stop expanding nested parent-type entities.
-    const queue = [...(childrenOf.get(parent.id) || [])];
+    const queue = [...directChildren];
     const seen = new Set();
     while (queue.length) {
       const node = queue.shift();

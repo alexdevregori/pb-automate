@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { Plus, Zap, Check } from 'lucide-react';
 import { getScripts } from '../lib/api';
 import ScriptRow from '../components/ScriptRow';
+import { identify, capture } from '../lib/analytics';
+import { getWorkspaceId } from '../lib/auth';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -20,6 +22,8 @@ export default function Dashboard() {
       localStorage.setItem('pb_token', tokenFromUrl);
       window.history.replaceState({}, '', '/dashboard');
     }
+    const wsId = getWorkspaceId();
+    if (wsId) identify(wsId);
     reload().finally(() => setLoading(false));
   }, []);
 
@@ -39,7 +43,10 @@ export default function Dashboard() {
           Deploy automation scripts to your Productboard workspace — no code required.
         </p>
         <button
-          onClick={() => navigate('/scripts/new')}
+          onClick={() => {
+            capture('add_script_clicked', { from: 'welcome_hero' });
+            navigate('/scripts/new');
+          }}
           className="rounded-lg bg-pb-blue px-4 py-2 text-sm font-semibold text-white hover:bg-pb-blue/90"
         >
           + Deploy your first script
@@ -63,7 +70,10 @@ export default function Dashboard() {
           <p className="text-xs text-gray-500">{deployments.length} active</p>
         </div>
         <button
-          onClick={() => navigate('/scripts/new')}
+          onClick={() => {
+            capture('add_script_clicked', { from: 'dashboard_header' });
+            navigate('/scripts/new');
+          }}
           className="inline-flex items-center gap-1 rounded-lg bg-pb-blue px-3 py-1.5 text-xs font-semibold text-white hover:bg-pb-blue/90"
         >
           <Plus size={14} /> Add Script

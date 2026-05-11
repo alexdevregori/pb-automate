@@ -26,3 +26,21 @@ export function clearToken() {
 export function isAuthenticated() {
   return !!getToken();
 }
+
+/** Decode the JWT payload (no verification — server signs, client just reads). */
+export function decodeToken(token) {
+  if (!token) return null;
+  try {
+    const [, payload] = token.split('.');
+    if (!payload) return null;
+    // Convert URL-safe base64 to standard base64 for atob.
+    const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    return JSON.parse(atob(b64));
+  } catch {
+    return null;
+  }
+}
+
+export function getWorkspaceId() {
+  return decodeToken(getToken())?.workspaceId || null;
+}

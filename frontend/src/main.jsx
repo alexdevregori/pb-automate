@@ -2,7 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
+import { initAnalytics } from './lib/analytics';
 import './index.css';
+
+initAnalytics();
 import Login from './pages/Login';
 import AppLayout from './components/AppLayout';
 import Dashboard from './pages/Dashboard';

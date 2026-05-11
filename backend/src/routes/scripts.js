@@ -6,6 +6,7 @@ import { getToken } from '../services/secretManager.js';
 import { createPBClient } from '../services/pbClient.js';
 import { runSyncField } from '../scripts/syncField.js';
 import { runCountFeatures } from '../scripts/countFeatures.js';
+import { capture } from '../services/analytics.js';
 
 const router = Router();
 
@@ -108,6 +109,13 @@ router.post('/deploy', requireAuth, async (req, res) => {
 
   console.log(`✓ deployed ${scriptId} (${deploymentId.slice(0, 8)}) — run ${run.status}, ${run.logs.length} log line(s)`);
 
+  capture('script_deployed', workspaceId, {
+    scriptId,
+    schedule: deployment.schedule,
+    dryRun: !!config?.dryRun,
+    firstRunStatus: run.status,
+  });
+
   res.json({ deployment, run });
 });
 
@@ -130,6 +138,15 @@ router.post('/:id/run', requireAuth, async (req, res) => {
 
   const pbClient = createPBClient(await getToken(workspaceId));
   const run = await runAndPersist(deployment, pbClient, workspaceId);
+
+  capture('script_run_completed', workspaceId, {
+    scriptId: deployment.scriptId,
+    deploymentId: deployment.id,
+    status: run.status,
+    durationMs: run.durationMs,
+    dryRun: !!deployment.config?.dryRun,
+  });
+
   res.json({ run });
 });
 
@@ -144,16 +161,31 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // PATCH /scripts/:id — pause/resume or update config
 router.patch('/:id', requireAuth, async (req, res) => {
-  const updated = await patchDeployment(
-    req.workspace.workspaceId, req.params.id, req.body
-  );
+  const workspaceId = req.workspace.workspaceId;
+  const updated = await patchDeployment(workspaceId, req.params.id, req.body);
   if (!updated) return res.status(404).json({ message: 'Deployment not found' });
+
+  // Distinguish pause/resume from full config edit for cleaner analytics.
+  if (Object.keys(req.body || {}).length === 1 && 'paused' in req.body) {
+    capture(req.body.paused ? 'script_paused' : 'script_resumed', workspaceId, {
+      scriptId: updated.scriptId,
+      deploymentId: updated.id,
+    });
+  } else {
+    capture('script_updated', workspaceId, {
+      scriptId: updated.scriptId,
+      deploymentId: updated.id,
+      patchedKeys: Object.keys(req.body || {}),
+    });
+  }
   res.json(updated);
 });
 
 // DELETE /scripts/:id
 router.delete('/:id', requireAuth, async (req, res) => {
-  await deleteDeployment(req.workspace.workspaceId, req.params.id);
+  const workspaceId = req.workspace.workspaceId;
+  await deleteDeployment(workspaceId, req.params.id);
+  capture('script_deleted', workspaceId, { deploymentId: req.params.id });
   res.status(204).end();
 });
 

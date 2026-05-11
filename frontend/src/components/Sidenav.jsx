@@ -1,6 +1,7 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { Boxes, Activity, Settings, LogOut } from 'lucide-react';
 import { clearToken } from '../lib/auth';
+import { capture, reset } from '../lib/analytics';
 
 const items = [
   { to: '/dashboard', label: 'Scripts', icon: Boxes,
@@ -16,7 +17,9 @@ export default function Sidenav({ workspaceLabel = 'My Workspace' }) {
   const { pathname } = useLocation();
 
   const handleLogout = () => {
+    capture('signed_out');
     clearToken();
+    reset();
     navigate('/');
   };
 

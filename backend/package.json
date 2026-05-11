@@ -23,6 +23,7 @@
     "express": "^5.2.1",
     "firebase-admin": "^13.8.0",
     "jsonwebtoken": "^9.0.3",
+    "posthog-node": "^5.33.4",
     "uuid": "^13.0.0"
   },
   "devDependencies": {

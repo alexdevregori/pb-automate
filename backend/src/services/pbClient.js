@@ -28,7 +28,7 @@ export function createPBClient(accessToken) {
      */
     async listAllEntities(types) {
       if (!types?.length) return [];
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ archived: 'false' });
       for (const t of types) params.append('type[]', t);
 
       let all = [];
@@ -71,6 +71,26 @@ export function createPBClient(accessToken) {
     async updateEntityFields(id, fields) {
       const res = await client.patch(`/entities/${id}`, { fields });
       return res.data?.data;
+    },
+
+    /**
+     * Fetch the parent entity ID for a given entity by paging through its
+     * relationships. Used as a fallback when the inline relationships on a
+     * list response don't include the parent (they're paginated too).
+     */
+    async fetchParentId(entityId) {
+      let url = `/entities/${entityId}/relationships`;
+      while (url) {
+        const res = await client.get(url);
+        const rels = res.data?.data || [];
+        const parent = rels.find((r) => r.type === 'parent');
+        if (parent) return parent.target?.id || null;
+        const next = res.data?.links?.next;
+        if (!next) break;
+        // next is an absolute URL — strip the base so axios uses its baseURL
+        url = next.replace(/^https:\/\/api\.productboard\.com\/v2/, '');
+      }
+      return null;
     },
 
     /**
