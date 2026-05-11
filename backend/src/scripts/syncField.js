@@ -46,15 +46,24 @@ export async function runSyncField(pbClient, config, _workspaceId) {
     log(`[ERROR] Could not load configuration for ${parentType}: ${err.message}`);
     throw err;
   }
-  const fieldsByName = Object.entries(parentConfig?.data?.fields || {})
-    .map(([key, def]) => ({ key, name: def.name || key }));
-  const matched = fieldsByName.find((f) => f.name === fieldName);
-  if (!matched) {
+  const fieldDefs = parentConfig?.data?.fields || {};
+  const matchedEntry = Object.entries(fieldDefs).find(
+    ([, def]) => (def.name || '') === fieldName
+  );
+  if (!matchedEntry) {
     log(`[ERROR] Field "${fieldName}" not found on ${parentType}.`);
     return { logs, summary: `Field "${fieldName}" not found` };
   }
-  const fieldKey = matched.key;
+  const [fieldKey, fieldDef] = matchedEntry;
   log(`Resolved field "${fieldName}" → key ${fieldKey}`);
+
+  // Figure out which attributes PB will accept in a PATCH for this field.
+  // The schema may describe an object (status, owner, simple custom ref) or
+  // an array of objects (tags, teams). We use this to filter the source value
+  // so we don't send unknown attributes like 'name' on a field that only
+  // accepts 'id' (or vice versa).
+  const acceptedProps = acceptedPropsOf(fieldDef?.schema);
+  log(`[diag] field accepts attributes: ${acceptedProps ? acceptedProps.join(', ') : '(scalar or unknown)'}`);
 
   // 2. Fetch all entities involved (parent + every child type).
   //    We need them all in memory to build the tree.
@@ -181,7 +190,7 @@ export async function runSyncField(pbClient, config, _workspaceId) {
             plannedUpdates++;
           } else {
             try {
-              await pbClient.updateEntityFields(node.id, { [fieldKey]: patchValue(sourceValue) });
+              await pbClient.updateEntityFields(node.id, { [fieldKey]: patchValue(sourceValue, acceptedProps) });
               log(`[SYNC] ${node.type} "${nodeName}": ${fieldName} ${fmt(existing)} → ${fmt(sourceValue)}`);
               appliedUpdates++;
             } catch (err) {
@@ -221,19 +230,46 @@ export async function runSyncField(pbClient, config, _workspaceId) {
 }
 
 /**
- * Strip an entity reference down to what PB accepts in a PATCH body.
+ * Read the field's schema from its configuration and return the list of
+ * attribute names PB accepts in a PATCH body. Different field types accept
+ * different shapes — team refs only accept {id}, dropdown options only
+ * accept {name}, owner accepts {id, email}, etc.
  *
- * Entity references in PB list/get responses are full objects like
- *   { id, name, links: {...} }
- * but PB's PATCH endpoint rejects unknown attributes on custom fields with
- *   "Unknown attribute 'name' in field with ID '<uuid>'"
- * So before sending, narrow object values to just { id } (or { email } for
- * user refs that don't have ids, as a fallback).
+ * Returns null if the field is a scalar or we can't determine the shape.
  */
-function patchValue(value) {
+function acceptedPropsOf(schema) {
+  if (!schema || typeof schema !== 'object') return null;
+  if (schema.type === 'array' && schema.items?.properties) {
+    return Object.keys(schema.items.properties);
+  }
+  if (schema.properties) {
+    return Object.keys(schema.properties);
+  }
+  return null;
+}
+
+/**
+ * Narrow a source field value to what PB will accept in a PATCH body.
+ *
+ * PB returns full entity refs ({id, name, color, links, ...}) but rejects
+ * unknown attributes on the PATCH side. If we know the accepted attributes
+ * from the field's schema, filter to those. Otherwise fall back to a
+ * best-effort {id}/{email}/{name} narrowing.
+ */
+function patchValue(value, acceptedProps) {
   if (value === null || value === undefined) return value;
   if (typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map(patchValue);
+  if (Array.isArray(value)) return value.map((v) => patchValue(v, acceptedProps));
+
+  if (acceptedProps && acceptedProps.length > 0) {
+    const filtered = {};
+    for (const k of acceptedProps) {
+      if (value[k] !== undefined) filtered[k] = value[k];
+    }
+    if (Object.keys(filtered).length > 0) return filtered;
+  }
+
+  // Fallback when we couldn't read a schema.
   if (value.id) return { id: value.id };
   if (value.email) return { email: value.email };
   if (value.name) return { name: value.name };
