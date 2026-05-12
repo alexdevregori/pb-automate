@@ -1,0 +1,17 @@
+{
+  "hosting": {
+    "site": "pb-automate-hq",
+    "public": "public",
+    "ignore": ["firebase.json", "**/.*"],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "pb-automate-backend",
+          "region": "us-central1",
+          "projectId": "script-deployer-alpha"
+        }
+      }
+    ]
+  }
+}
