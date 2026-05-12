@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Sidenav from './Sidenav';
 import { isAuthenticated, clearToken, getWorkspaceId } from '../lib/auth';
-import { identify, reset } from '../lib/events';
+import { identify, capture, reset } from '../lib/events';
 import { checkPBStatus } from '../lib/api';
 
 export default function AppLayout() {
@@ -14,7 +14,10 @@ export default function AppLayout() {
     // Re-identify on every page load so _distinctId is always set regardless
     // of which page the user lands on or refreshes.
     const wsId = getWorkspaceId();
-    if (wsId) identify(wsId);
+    if (wsId) {
+      identify(wsId);
+      capture('page_viewed', { path: pathname });
+    }
 
     checkPBStatus().catch((err) => {
       // 401 from our backend means PB rejected the stored token — OAuth app was removed.

@@ -22,7 +22,7 @@ export function initAnalytics() {
   posthog.init(POSTHOG_KEY, {
     api_host: '/api/ingest',
     autocapture: false,
-    capture_pageview: false,
+    capture_pageview: true,
     session_recording: {
       maskAllInputs: true,
       maskAllText: false,

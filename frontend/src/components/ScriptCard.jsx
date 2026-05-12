@@ -1,27 +1,17 @@
-import React from 'react';
-
-const icons = {
-  sync: '🔄',
-  rollup: '📊',
-  tags: '🏷️',
-  custom: '⚙️',
-};
-
-export default function ScriptCard({ id, title, description, icon, selected, onSelect }) {
+export default function ScriptCard({ id, title, description, selected, onSelect }) {
   return (
     <button
       onClick={() => onSelect(id)}
-      className={`rounded-xl border-2 p-5 text-left transition-all ${
+      className={`rounded-xl border p-5 text-left transition-all ${
         selected
-          ? 'border-pb-blue bg-white shadow-md'
-          : 'border-gray-200 bg-white hover:border-gray-300'
+          ? 'border-[1.5px] border-pb-dark bg-pb-cream'
+          : 'border border-pb-dark/[0.12] bg-white hover:border-pb-dark/[0.25]'
       }`}
     >
-      <div className="mb-3 text-2xl">{icons[icon] || '📦'}</div>
-      <h3 className="mb-1 text-sm font-semibold text-pb-dark">{title}</h3>
-      <p className="text-xs text-gray-500">{description}</p>
+      <h3 className="mb-1 text-[13.5px] font-medium text-pb-dark">{title}</h3>
+      <p className="text-[12px] text-pb-muted">{description}</p>
       {selected && (
-        <div className="mt-3 inline-block rounded-full bg-pb-blue/10 px-2.5 py-0.5 text-xs font-medium text-pb-blue">
+        <div className="mt-3 inline-block rounded-full bg-pb-warm px-2.5 py-0.5 text-[11px] font-medium text-pb-dark">
           Selected
         </div>
       )}

@@ -96,4 +96,6 @@ if (existsSync(publicDir)) {
 
 app.listen(PORT, () => {
   console.log(`PB Automate backend running on port ${PORT}`);
+  const phKey = process.env.POSTHOG_KEY;
+  console.log(`PostHog: ${phKey ? `key set (${phKey.slice(0, 8)}...)` : 'NOT CONFIGURED — analytics disabled'}`);
 });
