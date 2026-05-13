@@ -4,7 +4,7 @@ import { requireAuth } from '../middleware/auth.js';
 import { saveDeployment, getDeployments, getDeployment, saveRunLog, getRunLogs, patchDeployment, deleteDeployment } from '../services/firestore.js';
 import { getToken } from '../services/secretManager.js';
 import { createPBClient } from '../services/pbClient.js';
-import { runSyncField } from '../scripts/syncField.js';
+import { SCRIPT_REGISTRY } from '../scripts/index.js';
 import { capture } from '../services/analytics.js';
 
 const router = Router();
@@ -14,27 +14,14 @@ const sid = (req) => {
   return s ? { $session_id: s } : {};
 };
 
-const AVAILABLE_SCRIPTS = [
-  {
-    id: 'syncField',
-    name: 'Sync Custom Field',
-    description: 'Sync a custom field value between parent and child features.',
-  },
-  {
-    id: 'rollupScore',
-    name: 'Roll Up Priority Score',
-    description: 'Aggregate child priority scores to the parent feature level.',
-  },
-  {
-    id: 'propagateTags',
-    name: 'Propagate Tags',
-    description: 'Copy tags from parent features down to all child sub-features.',
-  },
-];
+const AVAILABLE_SCRIPTS = Object.entries(SCRIPT_REGISTRY).map(([id, s]) => ({
+  id, name: s.name, description: s.description,
+}));
 
 async function executeScript(scriptId, pbClient, config, workspaceId) {
-  if (scriptId === 'syncField') return runSyncField(pbClient, config, workspaceId);
-  throw new Error(`No runner registered for scriptId="${scriptId}"`);
+  const entry = SCRIPT_REGISTRY[scriptId];
+  if (!entry) throw new Error(`No runner registered for scriptId="${scriptId}"`);
+  return entry.runner(pbClient, config, workspaceId);
 }
 
 async function runAndPersist(deployment, pbClient, workspaceId) {
