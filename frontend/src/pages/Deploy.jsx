@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { deployScript } from '../lib/api';
+import { SCRIPT_REGISTRY } from '../lib/scriptRegistry';
 
 export default function Deploy({ scriptId, config, onSuccess }) {
   const [deploying, setDeploying] = useState(false);
@@ -20,7 +21,7 @@ export default function Deploy({ scriptId, config, onSuccess }) {
 
   const rows = [
     ['Name',               config?.name || '(not set)'],
-    ['Script',             'Sync Field'],
+    ['Script', SCRIPT_REGISTRY[scriptId]?.label || scriptId],
     ['From',               config?.parentType || '(not set)'],
     ['To',                 (config?.childTypes || []).join(', ') || '(none selected)'],
     ['Field',              config?.fieldName || '(not set)'],

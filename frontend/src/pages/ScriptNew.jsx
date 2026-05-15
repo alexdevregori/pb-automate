@@ -4,10 +4,9 @@ import { toast } from 'sonner';
 import MiniStepBar from '../components/MiniStepBar';
 import Configure from './Configure';
 import Deploy from './Deploy';
+import { SCRIPT_REGISTRY } from '../lib/scriptRegistry';
 
-const SCRIPTS = [
-  { id: 'syncField', label: 'Sync Custom Field' },
-];
+const SCRIPTS = Object.entries(SCRIPT_REGISTRY).map(([id, s]) => ({ id, label: s.label }));
 
 export default function ScriptNew() {
   const navigate = useNavigate();
