@@ -23,4 +23,12 @@ describe('SCRIPT_REGISTRY', () => {
   it('includes syncField', () => {
     expect(SCRIPT_REGISTRY).toHaveProperty('syncField');
   });
+
+  it('each runner returns { logs, summary } when called', async () => {
+    for (const [id, entry] of Object.entries(SCRIPT_REGISTRY)) {
+      const result = await entry.runner(null, {}, 'test');
+      expect(Array.isArray(result.logs), `${id}.logs must be an array`).toBe(true);
+      expect(typeof result.summary, `${id}.summary must be a string`).toBe('string');
+    }
+  });
 });
