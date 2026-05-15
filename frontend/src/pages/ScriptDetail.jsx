@@ -129,7 +129,7 @@ export default function ScriptDetail() {
             <h1 className="font-sans font-semibold text-[28px] tracking-tight text-pb-dark">
               {deployment.name || deployment.scriptId}
             </h1>
-            {deployment.scriptId === 'syncField' && (
+            {deployment.config?.dryRun !== undefined && (
               <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
                 deployment.config?.dryRun
                   ? 'bg-pb-warm text-pb-muted'

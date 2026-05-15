@@ -11,7 +11,7 @@ const SCRIPTS = Object.entries(SCRIPT_REGISTRY).map(([id, s]) => ({ id, label: s
 export default function ScriptNew() {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
-  const [scriptId, setScriptId] = useState('syncField');
+  const [scriptId, setScriptId] = useState(SCRIPTS[0]?.id);
   const [config, setConfig] = useState(null);
 
   return (
